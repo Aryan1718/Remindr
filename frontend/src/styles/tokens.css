@@ -1,0 +1,18 @@
+:root {
+  --color-surface: #000000;
+  --color-surface-alt: #181818;
+  --color-surface-elevated: #202020;
+  --color-ink: #ffffff;
+  --color-muted: #f5f5f5;
+  --color-faint: #969696;
+  --color-accent: #ffc000;
+  --color-accent-strong: #917300;
+  --color-focus: #29abe2;
+  --color-link: #3860be;
+  --color-border: rgba(255, 255, 255, 0.12);
+  --color-success: #5ed47c;
+  --color-warning: #ffce3e;
+  --color-danger: #ff8d67;
+  --shadow-card: none;
+  --shadow-deep: none;
+}
