@@ -16,7 +16,8 @@ create extension if not exists vector;
 create type connector_provider as enum (
   'gmail',
   'google_calendar',
-  'google_notes'
+  'google_notes',
+  'telegram'
 );
 
 create type connector_status as enum (
