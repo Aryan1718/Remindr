@@ -2,3 +2,6 @@ fastapi
 uvicorn
 pydantic
 python-dotenv
+psycopg
+httpx
+PyJWT[crypto]
