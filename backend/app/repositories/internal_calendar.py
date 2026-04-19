@@ -165,6 +165,21 @@ class InternalCalendarRepository:
 
         return [InternalCalendarBlockModel.from_record(record) for record in records]
 
+    def list_future_blocks(
+        self,
+        *,
+        user_id: str,
+        starts_after: datetime,
+        ends_before: datetime | None = None,
+        limit: int = 200,
+    ) -> list[InternalCalendarBlockModel]:
+        return self.list_blocks(
+            user_id=user_id,
+            start=starts_after,
+            end=ends_before,
+            limit=limit,
+        )
+
     def get_block(self, *, block_id: str, user_id: str) -> InternalCalendarBlockModel | None:
         with self.connection.cursor() as cursor:
             cursor.execute(
