@@ -1,3 +1,4 @@
+import { frontendEnv } from "@/lib/env";
 import { sleep } from "@/lib/utils";
 
 export async function simulateRequest<T>(resolver: () => T): Promise<T> {
@@ -6,8 +7,7 @@ export async function simulateRequest<T>(resolver: () => T): Promise<T> {
 }
 
 export function getApiBaseUrl() {
-  const viteEnv = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
-  return viteEnv?.VITE_API_BASE_URL ?? "http://127.0.0.1:8000/api";
+  return frontendEnv.apiBaseUrl.replace(/\/+$/, "");
 }
 
 function findAuthTokenInStorage(): string | null {
@@ -15,11 +15,37 @@ function findAuthTokenInStorage(): string | null {
     return null;
   }
 
-  const directKeys = ["access_token", "supabase.access_token"];
+  const directKeys = ["access_token", "supabase.access_token", "remindr.auth.session"];
   for (const key of directKeys) {
     const value = window.localStorage.getItem(key);
-    if (value?.trim()) {
-      return value.trim();
+    if (!value?.trim()) {
+      continue;
+    }
+
+    if (key === "remindr.auth.session") {
+      try {
+        const parsed = JSON.parse(value) as { accessToken?: string };
+        if (typeof parsed.accessToken === "string" && parsed.accessToken.trim()) {
+          return parsed.accessToken.trim();
+        }
+      } catch {
+        continue;
+      }
+      continue;
+    }
+
+    return value.trim();
+  }
+
+  const sessionValue = window.sessionStorage.getItem("remindr.auth.session");
+  if (sessionValue?.trim()) {
+    try {
+      const parsed = JSON.parse(sessionValue) as { accessToken?: string };
+      if (typeof parsed.accessToken === "string" && parsed.accessToken.trim()) {
+        return parsed.accessToken.trim();
+      }
+    } catch {
+      return null;
     }
   }
 

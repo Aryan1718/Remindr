@@ -73,6 +73,12 @@ class InternalCalendarRejectRequest(BaseModel):
     def normalize_strings(cls, value: str | None) -> str | None:
         return _strip_or_none(value)
 
+    @model_validator(mode="after")
+    def validate_reason(self) -> "InternalCalendarRejectRequest":
+        if self.reason_code is None and self.reason_text is None:
+            raise ValueError("reason_code or reason_text is required")
+        return self
+
 
 class InternalCalendarRescheduleRequest(BaseModel):
     new_starts_at: datetime | None = None
@@ -107,6 +113,18 @@ class InternalCalendarCompleteRequest(BaseModel):
     @field_validator("notes")
     @classmethod
     def normalize_notes(cls, value: str | None) -> str | None:
+        return _strip_or_none(value)
+
+
+class InternalCalendarFeedbackCreateRequest(BaseModel):
+    response_type: FeedbackResponseType
+    reason_code: str | None = Field(default=None, max_length=100)
+    reason_text: str | None = None
+    fatigue_score: int | None = Field(default=None, ge=0, le=5)
+
+    @field_validator("reason_code", "reason_text")
+    @classmethod
+    def normalize_strings(cls, value: str | None) -> str | None:
         return _strip_or_none(value)
 
 
@@ -202,6 +220,13 @@ class InternalCalendarDetailEnvelope(BaseModel):
 
 
 class InternalCalendarMutationEnvelope(BaseModel):
+    success: bool = True
+    data: dict[str, Any]
+    message: str | None = None
+    meta: dict[str, Any] = Field(default_factory=dict)
+
+
+class CalendarFeedbackEnvelope(BaseModel):
     success: bool = True
     data: dict[str, Any]
     message: str | None = None

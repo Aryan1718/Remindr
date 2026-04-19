@@ -1,5 +1,8 @@
 import { Navigate, RouterProvider, createBrowserRouter } from "react-router-dom";
 import { ProtectedRoute, PublicOnlyRoute } from "@/components/auth/AuthGate";
+import { ConnectorCallbackPage } from "@/pages/ConnectorCallbackPage";
+import { GoogleCalendarConnectPage } from "@/pages/GoogleCalendarConnectPage";
+import { IntegrationsPage } from "@/pages/IntegrationsPage";
 import { LoginPage } from "@/pages/LoginPage";
 import { NotFoundPage } from "@/pages/NotFoundPage";
 import { OnboardingPage } from "@/pages/OnboardingPage";
@@ -78,12 +81,11 @@ const router = createBrowserRouter([
       },
       {
         path: "/integrations",
-        element: (
-          <RoutePlaceholderPage
-            description="The integrations screen is temporarily replaced with a clean placeholder."
-            title="Integrations"
-          />
-        ),
+        element: <IntegrationsPage />,
+      },
+      {
+        path: "/integrations/google-calendar",
+        element: <GoogleCalendarConnectPage />,
       },
       {
         path: "/settings",
@@ -96,12 +98,7 @@ const router = createBrowserRouter([
       },
       {
         path: "/connectors/:provider/callback",
-        element: (
-          <RoutePlaceholderPage
-            description="Connector callback handling will be rebuilt after the core screens are replaced."
-            title="Connector callback"
-          />
-        ),
+        element: <ConnectorCallbackPage />,
       },
     ],
   },

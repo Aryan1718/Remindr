@@ -29,9 +29,58 @@ interface CurrentUserResponse {
   };
 }
 
+interface ConnectorListResponse {
+  success: boolean;
+  data: {
+    items: Array<{
+      id: string;
+      provider: "google_calendar" | "gmail" | "telegram" | "google_notes";
+      status: "connected" | "expired" | "revoked" | "error";
+      account_email: string | null;
+      metadata_json: Record<string, unknown>;
+      last_sync_at: string | null;
+      updated_at: string | null;
+    }>;
+  };
+}
+
+interface ConnectorEnvelopeResponse {
+  success: boolean;
+  data: {
+    connector?: {
+      id: string;
+      provider: "google_calendar";
+      status: "connected" | "expired" | "revoked" | "error";
+      account_email: string | null;
+      metadata_json: Record<string, unknown>;
+      last_sync_at: string | null;
+      updated_at: string | null;
+    };
+    connector_id?: string;
+    job_id?: string;
+    job_type?: string;
+    job_status?: string;
+  };
+}
+
 interface TelegramConnectPayload {
   botToken: string;
   webhookBaseUrl?: string;
+}
+
+export interface GoogleCalendarConnectPayload {
+  accountEmail: string;
+  accessToken: string;
+  refreshToken?: string;
+  tokenExpiresAt?: string;
+  calendarId?: string;
+}
+
+interface GoogleCalendarOAuthStartResponse {
+  success: boolean;
+  data: {
+    authorization_url: string;
+  };
 }
 
 async function getCurrentUserId() {
@@ -77,13 +126,55 @@ async function fetchTelegramConnection() {
   }
 }
 
+function formatGoogleCalendarIntegration(
+  base: Integration,
+  connection:
+    | ConnectorListResponse["data"]["items"][number]
+    | null,
+): Integration {
+  if (!connection) {
+    return {
+      ...base,
+      status: "Not connected",
+      lastSync: "Not linked",
+      description:
+        "Connect Google Calendar so the assistant can read external commitments as scheduling constraints without writing into the internal planner.",
+    };
+  }
+
+  const connected = connection.status === "connected";
+  return {
+    ...base,
+    status: connected ? "Connected" : "Needs reconnect",
+    lastSync: connection.last_sync_at ? new Date(connection.last_sync_at).toLocaleString() : "Waiting for first sync",
+    description: connected
+      ? `Reading ${String(connection.metadata_json.calendar_id || "primary")} for external availability and constraint sync.`
+      : "The Google Calendar connector exists, but it needs attention before sync can continue cleanly.",
+  };
+}
+
+async function fetchConnectorList() {
+  try {
+    const response = await requestJson<ConnectorListResponse>("/connectors");
+    return response.data.items;
+  } catch {
+    return [];
+  }
+}
+
 export async function listIntegrations() {
+  const connectors = await fetchConnectorList();
   const telegramConnection = await fetchTelegramConnection();
   return simulateRequest(() => {
     const integrations = getDb().integrations;
 
     return integrations.map((integration) =>
-      integration.id === "telegram"
+      integration.id === "calendar"
+        ? formatGoogleCalendarIntegration(
+            integration,
+            connectors.find((connector) => connector.provider === "google_calendar") ?? null,
+          )
+        : integration.id === "telegram"
         ? formatTelegramIntegration(integration, telegramConnection)
         : integration,
     );
@@ -110,7 +201,7 @@ export function saveIntegration(integration: Integration) {
 }
 
 export async function connectTelegramBot({ botToken, webhookBaseUrl }: TelegramConnectPayload) {
-  await getCurrentUserId()
+  await getCurrentUserId();
   const response = await requestJson<TelegramConnectionResponse>("/telegram/bots/connect", {
     method: "POST",
     body: JSON.stringify({
@@ -120,4 +211,49 @@ export async function connectTelegramBot({ botToken, webhookBaseUrl }: TelegramC
   });
 
   return response.data.connection;
+}
+
+export async function connectGoogleCalendar({
+  accountEmail,
+  accessToken,
+  refreshToken,
+  tokenExpiresAt,
+  calendarId,
+}: GoogleCalendarConnectPayload) {
+  const response = await requestJson<ConnectorEnvelopeResponse>("/connectors/google-calendar/connect", {
+    method: "POST",
+    body: JSON.stringify({
+      account_email: accountEmail,
+      access_token: accessToken,
+      refresh_token: refreshToken || undefined,
+      token_expires_at: tokenExpiresAt || undefined,
+      metadata_json: {
+        calendar_id: calendarId || "primary",
+      },
+    }),
+  });
+
+  return response.data.connector;
+}
+
+export async function triggerGoogleCalendarSync(connectorId: string) {
+  const response = await requestJson<ConnectorEnvelopeResponse>(`/connectors/${connectorId}/sync`, {
+    method: "POST",
+    body: JSON.stringify({
+      sync_mode: "incremental",
+      lookahead_days: 14,
+      lookback_days: 7,
+      force: false,
+    }),
+  });
+
+  return response.data;
+}
+
+export async function startGoogleCalendarOAuth() {
+  const response = await requestJson<GoogleCalendarOAuthStartResponse>("/connectors/google-calendar/oauth/start", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+  return response.data.authorization_url;
 }

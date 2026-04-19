@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { Link } from "react-router-dom";
 import { useParams, useSearchParams } from "react-router-dom";
 import { Badge } from "@/components/ui/Badge";
 import { Card } from "@/components/ui/Card";
@@ -9,6 +10,9 @@ export function ConnectorCallbackPage() {
   const { provider = "connector" } = useParams();
   const [search] = useSearchParams();
   const status = search.get("status") ?? "success";
+  const connectorId = search.get("connector_id");
+  const jobStatus = search.get("job_status");
+  const reason = search.get("reason");
   const tone = useMemo(() => (status === "success" ? "success" : "warning"), [status]);
 
   return (
@@ -22,11 +26,20 @@ export function ConnectorCallbackPage() {
           {provider} authorization processed
         </h2>
         <p className="mx-auto mt-4 max-w-xl text-sm leading-7 text-muted">
-          In production this route would receive provider state, validate the callback, and then refresh the integration list.
+          The frontend has handed the provider result off to the backend connector flow. From here the backend owns
+          sync, normalization, and external event storage.
         </p>
-        <Button className="mt-6" type="button" variant="secondary">
-          Return to integrations
-        </Button>
+        {reason ? <p className="mx-auto mt-4 max-w-xl text-sm leading-7 text-danger">{reason}</p> : null}
+        {connectorId ? (
+          <p className="mx-auto mt-3 max-w-xl text-xs uppercase tracking-[0.22em] text-faint">
+            Connector {connectorId} {jobStatus ? `• sync ${jobStatus}` : ""}
+          </p>
+        ) : null}
+        <Link to="/integrations">
+          <Button className="mt-6" type="button" variant="secondary">
+            Return to integrations
+          </Button>
+        </Link>
       </Card>
     </PageContainer>
   );

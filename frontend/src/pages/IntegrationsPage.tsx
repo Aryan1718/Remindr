@@ -25,6 +25,11 @@ export function IntegrationsPage() {
   );
 
   async function handleConnect(integration: Integration) {
+    if (integration.id === "calendar") {
+      navigate("/integrations/google-calendar");
+      return;
+    }
+
     if (integration.id !== "telegram") {
       await saveMutation.mutateAsync({
         ...integration,
@@ -58,7 +63,7 @@ export function IntegrationsPage() {
     <>
       <PageContainer
         title="Integrations"
-        description="Google integrations are still mock-driven. Telegram is wired to the backend so each user can register their own bot token and receive webhook events through that bot."
+        description="Google Calendar now connects through the backend connector flow. Telegram is wired to the backend for live bot linking, while Gmail remains mock-driven until its connector path is implemented."
       >
         <div className="space-y-4">
           {data.map((integration) => (
