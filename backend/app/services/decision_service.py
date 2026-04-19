@@ -28,6 +28,7 @@ from app.schemas.decision import (
     DecisionSuggestionRead,
 )
 from app.services.fatigue_service import FatigueService
+from app.services.memory_service import MemoryService
 
 logger = logging.getLogger("app.services.decision")
 
@@ -40,7 +41,7 @@ class DecisionContext:
     upcoming_blocks: list[InternalCalendarBlockModel]
     fatigue: DecisionFatigueState
     available_time_minutes: int
-    relevant_memories: list[dict[str, str]]
+    relevant_memories: list[dict[str, object]]
     query: str | None = None
     domain_hint: str | None = None
 
@@ -74,12 +75,14 @@ class DecisionService:
         calendar_repository: InternalCalendarRepository | None = None,
         user_repository: UserRepository | None = None,
         fatigue_service: FatigueService | None = None,
+        memory_service: MemoryService | None = None,
     ) -> None:
         self.connection = connection
         self.task_repository = task_repository or self._require_repo(TaskRepository, connection)
         self.calendar_repository = calendar_repository or self._require_repo(InternalCalendarRepository, connection)
         self.user_repository = user_repository or self._require_repo(UserRepository, connection)
         self.fatigue_service = fatigue_service or FatigueService(connection)
+        self.memory_service = memory_service or MemoryService(connection)
 
     def query(self, *, user_id: str, payload: DecisionQueryRequest) -> DecisionResponse:
         context = self.build_decision_context(
@@ -214,7 +217,7 @@ class DecisionService:
             upcoming_blocks=upcoming_blocks,
             fatigue=fatigue,
             available_time_minutes=available_time,
-            relevant_memories=self._load_relevant_memories(user_id=user_id, query=query),
+            relevant_memories=self._load_relevant_memories(user_id=user_id, query=query, domain_hint=domain_hint),
             query=query,
             domain_hint=domain_hint,
         )
@@ -241,7 +244,8 @@ class DecisionService:
             energy_fit = self._energy_fit_score(task=task, fatigue_score=context.fatigue.score)
             planned_penalty = -4.0 if task.id in scheduled_soon_ids else 0.0
             deadline_risk = self._deadline_risk_score(task=task, now=now)
-            total = urgency + priority + time_fit + energy_fit + planned_penalty + deadline_risk
+            memory_alignment = self._memory_alignment_score(task=task, context=context, now=now)
+            total = urgency + priority + time_fit + energy_fit + planned_penalty + deadline_risk + memory_alignment
             reasons = self._build_task_reasons(
                 task=task,
                 urgency=urgency,
@@ -249,6 +253,8 @@ class DecisionService:
                 energy_fit=energy_fit,
                 planned_penalty=planned_penalty,
                 deadline_risk=deadline_risk,
+                memory_alignment=memory_alignment,
+                context=context,
             )
             scored.append(
                 ScoredTask(
@@ -403,6 +409,8 @@ class DecisionService:
         energy_fit: float,
         planned_penalty: float,
         deadline_risk: float,
+        memory_alignment: float,
+        context: DecisionContext,
     ) -> list[str]:
         reasons: list[str] = []
         if urgency >= 8:
@@ -425,6 +433,8 @@ class DecisionService:
 
         if planned_penalty < 0:
             reasons.append("is already planned soon")
+
+        reasons.extend(self._memory_reasons(task=task, context=context, memory_alignment=memory_alignment))
 
         if not reasons and task.priority >= 4:
             reasons.append("has high priority")
@@ -638,10 +648,51 @@ class DecisionService:
             self.connection.rollback()
             logger.warning("interaction_events table not found; skipped %s event", event_type)
 
-    def _load_relevant_memories(self, *, user_id: str, query: str | None) -> list[dict[str, str]]:
-        # TODO: wire in memory retrieval once a backend memory repository/service exists.
-        _ = (user_id, query)
-        return []
+    def _load_relevant_memories(self, *, user_id: str, query: str | None, domain_hint: str | None) -> list[dict[str, object]]:
+        return self.memory_service.get_relevant_memories(user_id=user_id, query=query, domain=domain_hint, limit=5)
+
+    def _memory_alignment_score(self, *, task: TaskModel, context: DecisionContext, now: datetime) -> float:
+        score = 0.0
+        hour = now.hour
+        evening_now = hour >= 17
+        for memory in context.relevant_memories:
+            statement = str(memory.get("statement") or "").casefold()
+            confidence = float(memory.get("confidence") or 0.0)
+            metadata = memory.get("metadata_json") or {}
+
+            if "avoids demanding evening work" in statement and evening_now and (task.energy_required or 0) >= 4:
+                score -= 1.5 * confidence
+            if "shorter focus blocks" in statement:
+                preferred_duration = int((metadata or {}).get("preferred_duration_minutes") or 45)
+                if task.estimated_minutes is not None and task.estimated_minutes <= preferred_duration:
+                    score += 1.1 * confidence
+                elif task.estimated_minutes is not None and task.estimated_minutes >= 90:
+                    score -= 1.0 * confidence
+            if "morning is a better execution window than evening" in statement and evening_now:
+                score -= 0.7 * confidence
+            if "weaker execution window" in statement and evening_now and task.priority < 4:
+                score -= 0.5 * confidence
+        return round(score, 2)
+
+    def _memory_reasons(
+        self,
+        *,
+        task: TaskModel,
+        context: DecisionContext,
+        memory_alignment: float,
+    ) -> list[str]:
+        if not context.relevant_memories or memory_alignment == 0:
+            return []
+        reasons: list[str] = []
+        for memory in context.relevant_memories:
+            statement = str(memory.get("statement") or "").casefold()
+            if "shorter focus blocks" in statement and task.estimated_minutes is not None and task.estimated_minutes <= 45:
+                reasons.append("matches your usual preference for shorter focus blocks")
+                break
+            if "avoids demanding evening work" in statement and memory_alignment < 0:
+                reasons.append("runs against your usual evening energy pattern")
+                break
+        return reasons
 
     def _now_in_user_timezone(self, context: DecisionContext) -> datetime:
         timezone_name = context.user.timezone if context.user is not None else "UTC"

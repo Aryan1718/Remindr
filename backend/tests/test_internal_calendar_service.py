@@ -18,9 +18,11 @@ from app.services.internal_calendar_service import InternalCalendarService
 from app.schemas.internal_calendar import (
     InternalCalendarCompleteRequest,
     InternalCalendarConfirmRequest,
+    InternalCalendarFeedbackCreateRequest,
     InternalCalendarRejectRequest,
     InternalCalendarRescheduleRequest,
 )
+from app.models.task import TaskModel, TaskStatus
 
 
 def _block(
@@ -75,11 +77,33 @@ def _feedback(response_type: FeedbackResponseType) -> CalendarFeedbackModel:
     )
 
 
+def _task(*, task_id: str = "task-1", user_id: str = "user-1", status: TaskStatus = TaskStatus.DONE) -> TaskModel:
+    now = datetime(2026, 4, 18, 8, 0, tzinfo=timezone.utc)
+    return TaskModel(
+        id=task_id,
+        user_id=user_id,
+        title="Linked task",
+        description=None,
+        priority=3,
+        estimated_minutes=60,
+        actual_minutes=55 if status == TaskStatus.DONE else None,
+        energy_required=2,
+        due_at=None,
+        status=status,
+        source="user",
+        metadata_json={},
+        created_at=now - timedelta(days=1),
+        updated_at=now,
+        completed_at=now if status == TaskStatus.DONE else None,
+    )
+
+
 class InternalCalendarServiceTests(unittest.TestCase):
     def setUp(self) -> None:
         self.service = InternalCalendarService.__new__(InternalCalendarService)
         self.service.repository = MagicMock()
         self.service.task_repository = MagicMock()
+        self.service.enqueue_memory_distillation = MagicMock()
 
     def test_confirm_block_updates_status_and_writes_feedback(self) -> None:
         original = _block()
@@ -105,6 +129,12 @@ class InternalCalendarServiceTests(unittest.TestCase):
             fatigue_score=2,
         )
         self.service.repository.log_calendar_event.assert_called_once()
+        self.service.enqueue_memory_distillation.assert_called_once_with(
+            user_id="user-1",
+            trigger_source="calendar_confirm",
+            entity_type="calendar_feedback",
+            entity_id="feedback-1",
+        )
 
     def test_reject_block_writes_reason_and_fatigue(self) -> None:
         original = _block()
@@ -131,6 +161,12 @@ class InternalCalendarServiceTests(unittest.TestCase):
             reason_code="too_tired",
             reason_text="Need a break",
             fatigue_score=5,
+        )
+        self.service.enqueue_memory_distillation.assert_called_once_with(
+            user_id="user-1",
+            trigger_source="calendar_reject",
+            entity_type="calendar_feedback",
+            entity_id="feedback-1",
         )
 
     def test_reschedule_block_updates_time_status_count_and_feedback(self) -> None:
@@ -170,6 +206,12 @@ class InternalCalendarServiceTests(unittest.TestCase):
             reason_text="Afternoon is better",
             fatigue_score=None,
         )
+        self.service.enqueue_memory_distillation.assert_called_once_with(
+            user_id="user-1",
+            trigger_source="calendar_reschedule",
+            entity_type="calendar_feedback",
+            entity_id="feedback-1",
+        )
 
     def test_complete_block_marks_done_and_writes_feedback(self) -> None:
         original = _block(status=CalendarBlockStatus.CONFIRMED)
@@ -194,6 +236,55 @@ class InternalCalendarServiceTests(unittest.TestCase):
             reason_text="Finished",
             fatigue_score=None,
         )
+        self.service.enqueue_memory_distillation.assert_called_once_with(
+            user_id="user-1",
+            trigger_source="calendar_feedback",
+            entity_type="calendar_feedback",
+            entity_id="feedback-1",
+        )
+
+    def test_create_feedback_enqueues_memory_distillation(self) -> None:
+        original = _block()
+        self.service.repository.get_block.return_value = original
+        self.service.repository.insert_feedback.return_value = _feedback(FeedbackResponseType.SNOOZED)
+
+        feedback = self.service.create_feedback(
+            user_id="user-1",
+            block_id="block-1",
+            payload=InternalCalendarFeedbackCreateRequest(
+                response_type=FeedbackResponseType.SNOOZED,
+                reason_text="Later today",
+            ),
+        )
+
+        self.assertEqual(feedback.response_type, FeedbackResponseType.SNOOZED)
+        self.service.enqueue_memory_distillation.assert_called_once_with(
+            user_id="user-1",
+            trigger_source="calendar_feedback",
+            entity_type="calendar_feedback",
+            entity_id="feedback-1",
+        )
+
+    def test_complete_block_with_task_completion_only_enqueues_once(self) -> None:
+        original = _block(status=CalendarBlockStatus.CONFIRMED)
+        updated = _block(status=CalendarBlockStatus.DONE)
+        self.service.repository.get_block.return_value = original
+        self.service.repository.update_block.return_value = updated
+        self.service.repository.insert_feedback.return_value = _feedback(FeedbackResponseType.COMPLETED)
+        self.service.task_repository.complete_task.return_value = _task()
+
+        self.service.complete_block(
+            user_id="user-1",
+            block_id="block-1",
+            payload=InternalCalendarCompleteRequest(task_completed=True),
+        )
+
+        self.service.enqueue_memory_distillation.assert_called_once_with(
+            user_id="user-1",
+            trigger_source="calendar_feedback",
+            entity_type="calendar_feedback",
+            entity_id="feedback-1",
+        )
 
     def test_other_user_cannot_mutate_block(self) -> None:
         self.service.repository.get_block.return_value = None
@@ -208,6 +299,7 @@ class InternalCalendarServiceTests(unittest.TestCase):
         self.assertEqual(ctx.exception.status_code, 404)
         self.service.repository.update_block.assert_not_called()
         self.service.repository.insert_feedback.assert_not_called()
+        self.service.enqueue_memory_distillation.assert_not_called()
 
     def test_invalid_fatigue_score_is_rejected(self) -> None:
         with self.assertRaises(ValidationError):
@@ -227,6 +319,7 @@ class InternalCalendarServiceTests(unittest.TestCase):
         self.assertIsNone(task)
         self.service.repository.update_block.assert_not_called()
         self.service.repository.insert_feedback.assert_not_called()
+        self.service.enqueue_memory_distillation.assert_not_called()
 
     def test_invalid_transition_returns_conflict(self) -> None:
         rejected_block = _block(status=CalendarBlockStatus.REJECTED)
@@ -242,6 +335,7 @@ class InternalCalendarServiceTests(unittest.TestCase):
         self.assertEqual(ctx.exception.status_code, 409)
         self.service.repository.update_block.assert_not_called()
         self.service.repository.insert_feedback.assert_not_called()
+        self.service.enqueue_memory_distillation.assert_not_called()
 
 
 if __name__ == "__main__":

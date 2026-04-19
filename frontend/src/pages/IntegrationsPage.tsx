@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { startGoogleCalendarOAuth } from "@/api/integrations";
 import { useSaveIntegrationMutation } from "@/features/integrations/mutations";
 import { useSaveOnboardingMutation } from "@/features/onboarding/mutations";
 import { useOnboardingQuery } from "@/features/onboarding/queries";
@@ -85,6 +86,7 @@ function normalizeConnectorStatus(isConnected: boolean, isSyncing: boolean): Con
 
 export function IntegrationsPage() {
   const navigate = useNavigate();
+  const [search, setSearch] = useSearchParams();
   const { data = [] } = useIntegrationsQuery();
   const { data: onboardingDraft } = useOnboardingQuery();
   const saveMutation = useSaveIntegrationMutation();
@@ -93,6 +95,10 @@ export function IntegrationsPage() {
   const [connectedIds, setConnectedIds] = useState<ConnectorId[]>([]);
   const [isFinalizing, setIsFinalizing] = useState(false);
   const timeoutIds = useRef<number[]>([]);
+  const callbackStatus = search.get("status");
+  const callbackConnectorId = search.get("connector_id");
+  const callbackJobStatus = search.get("job_status");
+  const callbackReason = search.get("reason");
 
   const particles = useMemo<ParticleSpec[]>(
     () =>
@@ -134,6 +140,22 @@ export function IntegrationsPage() {
     setConnectedIds([]);
   }, [onboardingDraft?.stage]);
 
+  useEffect(() => {
+    if (callbackStatus !== "success") {
+      return;
+    }
+    setConnectedIds((current) => (current.includes("calendar") ? current : [...current, "calendar"]));
+  }, [callbackStatus]);
+
+  function dismissCallbackBanner() {
+    const next = new URLSearchParams(search);
+    next.delete("status");
+    next.delete("connector_id");
+    next.delete("job_status");
+    next.delete("reason");
+    setSearch(next, { replace: true });
+  }
+
   function queueConnectorDraftUpdate(nextConnectorIds: ConnectorId[]) {
     if (!onboardingDraft) return;
 
@@ -145,11 +167,23 @@ export function IntegrationsPage() {
     });
   }
 
-  function handleConnect(connectorId: ConnectorId) {
+  async function handleConnect(connectorId: ConnectorId) {
     const connector = connectors.find((entry) => entry.id === connectorId);
     if (!connector || connector.status !== "disconnected") return;
     if (connectorId === "calendar") {
-      navigate("/integrations/google-calendar");
+      setSyncingIds((current) => [...current, connectorId]);
+      try {
+        const authorizationUrl = await startGoogleCalendarOAuth();
+        window.location.assign(authorizationUrl);
+        return;
+      } catch {
+        setSyncingIds((current) => current.filter((entry) => entry !== connectorId));
+        navigate("/integrations/google-calendar");
+        return;
+      }
+    }
+
+    if (syncingIds.includes(connectorId)) {
       return;
     }
 
@@ -236,6 +270,41 @@ export function IntegrationsPage() {
         </header>
 
         <main className="flex flex-1 flex-col items-center pt-10 sm:pt-14">
+          {callbackStatus ? (
+            <div className="remindr-connector-page-entry mx-auto mb-8 w-full max-w-3xl" style={{ animationDelay: "0.08s" }}>
+              <div
+                className={`rounded-3xl border px-5 py-4 text-left backdrop-blur ${
+                  callbackStatus === "success"
+                    ? "border-emerald-400/30 bg-emerald-500/10 text-emerald-50"
+                    : "border-amber-400/30 bg-amber-500/10 text-amber-50"
+                }`}
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.24em] opacity-80">
+                      {callbackStatus === "success" ? "Calendar connected" : "Connection needs review"}
+                    </p>
+                    <p className="mt-2 text-sm leading-7">
+                      {callbackStatus === "success"
+                        ? `Google Calendar connected successfully${callbackJobStatus ? ` and sync ${callbackJobStatus}` : ""}.`
+                        : callbackReason || "Google Calendar authorization could not be completed."}
+                    </p>
+                    {callbackConnectorId ? (
+                      <p className="mt-2 text-xs uppercase tracking-[0.18em] opacity-70">Connector {callbackConnectorId}</p>
+                    ) : null}
+                  </div>
+                  <button
+                    className="rounded-full border border-white/15 px-3 py-1 text-xs uppercase tracking-[0.18em] text-white/80 transition hover:border-white/30 hover:text-white"
+                    onClick={dismissCallbackBanner}
+                    type="button"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
           <div className="remindr-connector-page-entry mx-auto max-w-3xl text-center" style={{ animationDelay: "0.12s" }}>
             <h1 className="text-4xl font-semibold text-white sm:text-5xl lg:text-6xl">
               Connect your services

@@ -52,7 +52,7 @@ export function GoogleCalendarConnectPage() {
 
       const sync = await syncMutation.mutateAsync(connector.id);
       navigate(
-        `/connectors/google-calendar/callback?status=success&connector_id=${encodeURIComponent(connector.id)}&job_status=${encodeURIComponent(sync.job_status || "queued")}`,
+        `/integrations?status=success&connector_id=${encodeURIComponent(connector.id)}&job_status=${encodeURIComponent(sync.job_status || "queued")}`,
       );
     } catch (error) {
       setPageError(error instanceof Error ? error.message : "Unable to connect Google Calendar.");

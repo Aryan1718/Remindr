@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from datetime import UTC, datetime, timedelta
+from unittest.mock import MagicMock
 
 from pydantic import ValidationError
 
@@ -87,6 +88,7 @@ class FatigueServiceTests(unittest.TestCase):
     def test_create_checkin_success(self) -> None:
         repository = InMemoryFatigueRepository()
         service = FatigueService(connection=None, repository=repository)
+        service.enqueue_memory_distillation = MagicMock()
 
         checkin = service.create_checkin(
             user_id="user-1",
@@ -96,6 +98,12 @@ class FatigueServiceTests(unittest.TestCase):
         self.assertEqual(checkin.score, 4)
         self.assertEqual(checkin.user_id, "user-1")
         self.assertEqual(repository.logged_events[0]["event_type"], "fatigue_checkin_submitted")
+        service.enqueue_memory_distillation.assert_called_once_with(
+            user_id="user-1",
+            trigger_source="fatigue_checkin",
+            entity_type="fatigue_checkin",
+            entity_id="checkin-1",
+        )
 
     def test_invalid_score_rejected(self) -> None:
         with self.assertRaises(ValidationError):
@@ -163,6 +171,7 @@ class FatigueAggregationTests(unittest.TestCase):
         repository = InMemoryFatigueRepository()
         repository.timezones["user-1"] = "UTC"
         service = FatigueService(connection=None, repository=repository)
+        service.enqueue_memory_distillation = MagicMock()
         now = datetime(2026, 4, 20, 15, 0, tzinfo=UTC)
 
         service.create_checkin(

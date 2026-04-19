@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 
 from app.models.telegram import ConnectorStatus, TelegramConnectorModel
 from app.models.user import UserModel, UserPreferencesModel
+from app.services.agent_service import TelegramAgentReply
 from app.services.telegram_service import TelegramService
 
 
@@ -123,11 +124,18 @@ class InMemoryUserRepository:
 
 
 class RecordingTelegramService(TelegramService):
-    def __init__(self, repository: InMemoryTelegramRepository, user_repository: InMemoryUserRepository) -> None:
+    def __init__(
+        self,
+        repository: InMemoryTelegramRepository,
+        user_repository: InMemoryUserRepository,
+        *,
+        agent_service=None,
+    ) -> None:
         super().__init__(
             connection=None,
             repository=repository,
             user_repository=user_repository,
+            agent_service=agent_service,
         )
         self.sent_messages: list[dict] = []
         self.telegram_requests: list[dict] = []
@@ -161,6 +169,16 @@ class RecordingTelegramService(TelegramService):
                 },
             }
         return {"ok": True, "result": True}
+
+
+class FakeAgentService:
+    def __init__(self, reply: TelegramAgentReply | None = None) -> None:
+        self.reply = reply
+        self.calls: list[dict] = []
+
+    def handle_telegram_inbound(self, *, user_id: str, inbound) -> TelegramAgentReply | None:
+        self.calls.append({"user_id": user_id, "inbound": inbound})
+        return self.reply
 
 
 class TelegramServiceTests(unittest.TestCase):
@@ -212,7 +230,7 @@ class TelegramServiceTests(unittest.TestCase):
         self.assertNotIn("telegram_onboarding", user_repository.preferences.profile_json)
         self.assertEqual(
             service.sent_messages[-1]["payload"]["text"],
-            "I verified the bot token. Do you want to link this Telegram chat to Remindr?",
+            "Thank you for confirming. I verified the bot token. Do you want to link this Telegram chat to Remindr?",
         )
         self.assertEqual(service.sent_messages[-1]["payload"]["reply_markup"]["keyboard"][0][0]["text"], "Yes")
 
@@ -239,7 +257,7 @@ class TelegramServiceTests(unittest.TestCase):
         send_message("Yes")
         self.assertEqual(repository.connector.metadata_json["confirmation_status"], "confirmed")
         self.assertEqual(repository.connector.metadata_json["telegram_chat_id"], 777)
-        self.assertEqual(service.sent_messages[-1]["payload"]["text"], "Telegram connected. I can use this chat for Remindr now. Send /start to continue onboarding.")
+        self.assertEqual(service.sent_messages[-1]["payload"]["text"], "Thank you for confirming. Your Telegram chat is now connected to Remindr.")
 
         send_message("/start")
         self.assertEqual(user_repository.preferences.profile_json["telegram_onboarding"]["step"], "full_name")
@@ -361,6 +379,107 @@ class TelegramServiceTests(unittest.TestCase):
         self.assertEqual(timezone_prompt["text"], "What timezone should I use for you? Choose one of the options below.")
         self.assertIn("reply_markup", timezone_prompt)
         self.assertEqual(timezone_prompt["reply_markup"]["keyboard"][0][0]["text"], "Pacific Time")
+
+    def test_confirmed_non_onboarding_message_routes_to_agent(self) -> None:
+        repository = InMemoryTelegramRepository()
+        repository.connector.metadata_json.update(
+            {
+                "confirmation_status": "confirmed",
+                "telegram_chat_id": 777,
+                "telegram_user_id": 555,
+            }
+        )
+        user_repository = InMemoryUserRepository()
+        user_repository.preferences.profile_json = {"telegram_onboarding": {"active": False}}
+        agent_service = FakeAgentService(
+            TelegramAgentReply(
+                text="First: Finish resume bullets.",
+                intent="decision_query",
+                reply_markup={"inline_keyboard": [[{"text": "Done", "callback_data": "task:done:task-1"}]]},
+            )
+        )
+        service = RecordingTelegramService(repository, user_repository, agent_service=agent_service)
+
+        service.handle_webhook(
+            user_id="user-1",
+            update={
+                "update_id": 9,
+                "message": {
+                    "text": "What should I do first tonight?",
+                    "from": {"id": 555},
+                    "chat": {"id": 777},
+                },
+            },
+            secret="secret-token",
+        )
+
+        self.assertEqual(agent_service.calls[0]["user_id"], "user-1")
+        self.assertEqual(agent_service.calls[0]["inbound"].text, "What should I do first tonight?")
+        self.assertEqual(service.sent_messages[-1]["payload"]["text"], "First: Finish resume bullets.")
+        self.assertEqual(service.sent_messages[-1]["payload"]["reply_markup"]["inline_keyboard"][0][0]["text"], "Done")
+
+    def test_callback_query_routes_to_agent_and_answers_callback(self) -> None:
+        repository = InMemoryTelegramRepository()
+        repository.connector.metadata_json.update(
+            {
+                "confirmation_status": "confirmed",
+                "telegram_chat_id": 777,
+                "telegram_user_id": 555,
+            }
+        )
+        user_repository = InMemoryUserRepository()
+        agent_service = FakeAgentService(
+            TelegramAgentReply(
+                text="Marked done: Finish resume bullets.",
+                intent="task_complete",
+                callback_notice="Task marked done.",
+            )
+        )
+        service = RecordingTelegramService(repository, user_repository, agent_service=agent_service)
+
+        service.handle_webhook(
+            user_id="user-1",
+            update={
+                "update_id": 10,
+                "callback_query": {
+                    "id": "callback-1",
+                    "data": "task:done:task-1",
+                    "from": {"id": 555},
+                    "message": {
+                        "text": "Finish resume bullets",
+                        "chat": {"id": 777},
+                    },
+                },
+            },
+            secret="secret-token",
+        )
+
+        self.assertEqual(agent_service.calls[0]["inbound"].callback_data, "task:done:task-1")
+        self.assertEqual(service.sent_messages[-1]["payload"]["text"], "Marked done: Finish resume bullets.")
+        answer_request = next(request for request in service.telegram_requests if request["method"] == "answerCallbackQuery")
+        self.assertEqual(answer_request["payload"]["callback_query_id"], "callback-1")
+        self.assertEqual(answer_request["payload"]["text"], "Task marked done.")
+
+    def test_send_linked_message_uses_existing_outbound_flow(self) -> None:
+        repository = InMemoryTelegramRepository()
+        repository.connector.metadata_json.update(
+            {
+                "confirmation_status": "confirmed",
+                "telegram_chat_id": 777,
+                "telegram_user_id": 555,
+            }
+        )
+        user_repository = InMemoryUserRepository()
+        service = RecordingTelegramService(repository, user_repository)
+
+        sent = service.send_linked_message(
+            user_id="user-1",
+            text="You have a good 45-minute window right now.",
+        )
+
+        self.assertTrue(sent)
+        self.assertEqual(service.sent_messages[-1]["payload"]["chat_id"], 777)
+        self.assertEqual(service.sent_messages[-1]["payload"]["text"], "You have a good 45-minute window right now.")
 
 
 if __name__ == "__main__":

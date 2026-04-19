@@ -6,6 +6,7 @@ from app.api.routes.connectors import router as connectors_router
 from app.api.routes.fatigue import router as fatigue_router
 from app.api.routes.health import router as health_router
 from app.api.routes.internal_calendar import router as internal_calendar_router
+from app.api.routes.notifications import router as notifications_router
 from app.api.routes.tasks import router as tasks_router
 from app.api.routes.users import router as users_router
 from app.api.routes.telegram import router as telegram_router
@@ -18,5 +19,6 @@ api_router.include_router(connectors_router, tags=["connectors"])
 api_router.include_router(internal_calendar_router, tags=["internal-calendar"])
 api_router.include_router(tasks_router, tags=["tasks"])
 api_router.include_router(fatigue_router, tags=["fatigue"])
+api_router.include_router(notifications_router, tags=["notifications"])
 api_router.include_router(decisions_router, tags=["decision"])
 api_router.include_router(telegram_router, tags=["telegram"])

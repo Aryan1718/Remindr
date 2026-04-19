@@ -21,6 +21,7 @@ from app.schemas.fatigue import (
     FatiguePatternRecomputeJobRead,
     FatiguePatternRecomputeRequest,
 )
+from app.workers.rq import enqueue_memory_distillation
 from app.workers.scheduler import enqueue_fatigue_pattern_recompute
 
 RECENT_CHECKIN_MAX_AGE = timedelta(hours=6)
@@ -61,6 +62,7 @@ class FatigueService:
         repository: FatigueRepository | None = None,
     ) -> None:
         self.repository = repository or FatigueRepository(connection)
+        self.enqueue_memory_distillation = enqueue_memory_distillation
 
     def create_checkin(self, *, user_id: str, payload: FatigueCheckinCreateRequest) -> FatigueCheckinRead:
         checkin = self.repository.create_checkin(user_id=user_id, payload=payload)
@@ -69,6 +71,12 @@ class FatigueService:
             event_type="fatigue_checkin_submitted",
             entity_id=checkin.id,
             payload={"score": checkin.score, "source": checkin.source},
+        )
+        self.enqueue_memory_distillation(
+            user_id=user_id,
+            trigger_source="fatigue_checkin",
+            entity_type="fatigue_checkin",
+            entity_id=checkin.id,
         )
         return FatigueCheckinRead.from_model(checkin)
 

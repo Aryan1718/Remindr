@@ -366,6 +366,45 @@ def test_free_window_generation_returns_expected_gaps() -> None:
     ]
 
 
+def test_two_external_events_block_internal_scheduling_without_creating_internal_copies() -> None:
+    base = datetime(2026, 4, 20, 8, 0, tzinfo=timezone.utc)
+    task = build_task(task_id="task-1", due_at=base + timedelta(hours=8), estimated_minutes=60)
+    events = [
+        build_external_event(
+            event_id="event-1",
+            starts_at=base + timedelta(hours=1),
+            ends_at=base + timedelta(hours=2),
+        ),
+        build_external_event(
+            event_id="event-2",
+            starts_at=base + timedelta(hours=3),
+            ends_at=base + timedelta(hours=4),
+        ),
+    ]
+    service, calendar_repo, external_repo, _ = build_service(tasks=[task], events=events)
+
+    suggestions = service.suggest_blocks(
+        user_id="user-1",
+        payload=InternalCalendarSuggestRequest(
+            task_ids=["task-1"],
+            window_start=base,
+            window_end=base + timedelta(hours=5),
+            max_suggestions=1,
+        ),
+    )
+
+    assert external_repo.calls == ["user-1"]
+    assert len(calendar_repo.created_blocks) == 1
+    assert calendar_repo.created_blocks[0].external_event_id is None
+    assert suggestions[0].starts_at == base + timedelta(hours=2)
+    assert suggestions[0].ends_at == base + timedelta(hours=3)
+    assert all(
+        not (suggestions[0].starts_at < event.ends_at and suggestions[0].ends_at > event.starts_at)
+        for event in events
+    )
+    assert all(block.id not in {"event-1", "event-2"} for block in calendar_repo.created_blocks)
+
+
 def test_candidate_scoring_prefers_earlier_better_fitting_window_for_urgent_task() -> None:
     base = datetime(2026, 4, 20, 8, 0, tzinfo=timezone.utc)
     due_at = base + timedelta(hours=2)

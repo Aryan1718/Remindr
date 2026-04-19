@@ -388,3 +388,35 @@ class InternalCalendarRepository:
         except UndefinedTable:
             self.connection.rollback()
             logger.warning("interaction_events table not found; skipped %s event", event_type)
+
+    def list_feedback_for_distillation(
+        self,
+        *,
+        user_id: str,
+        since: datetime,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                """
+                select
+                    feedback.id,
+                    feedback.calendar_block_id,
+                    feedback.user_id,
+                    feedback.response_type,
+                    feedback.reason_code,
+                    feedback.reason_text,
+                    feedback.fatigue_score,
+                    feedback.created_at,
+                    block.starts_at,
+                    block.ends_at,
+                    extract(epoch from (block.ends_at - block.starts_at)) / 60 as duration_minutes
+                from calendar_feedback feedback
+                join internal_calendar block on block.id = feedback.calendar_block_id
+                where feedback.user_id = %s and feedback.created_at >= %s
+                order by feedback.created_at desc
+                limit %s
+                """,
+                (user_id, since, limit),
+            )
+            return list(cursor.fetchall())
