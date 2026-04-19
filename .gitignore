@@ -26,6 +26,10 @@ pnpm-debug.log*
 .vite/
 .cache/
 
+# Python caches
+__pycache__/
+*.py[cod]
+
 # OS files
 .DS_Store
 Thumbs.db
