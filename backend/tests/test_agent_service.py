@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 from datetime import UTC, date, datetime
 
+from app.llm.schemas import LLMTextResult
 from app.models.internal_calendar import CalendarBlockStatus, CalendarBlockType
 from app.schemas.decision import (
     DayPlanResponse,
@@ -14,6 +15,23 @@ from app.schemas.fatigue import FatigueCheckinRead
 from app.schemas.internal_calendar import InternalCalendarBlockRead
 from app.schemas.task import TaskRead
 from app.services.agent_service import AgentService, NormalizedTelegramInbound
+
+
+class FakeLLMClient:
+    def __init__(self, text: str = "This is an LLM reply.") -> None:
+        self.text = text
+        self.calls: list[dict] = []
+
+    def generate_text(self, *, messages, model=None, temperature=0.2, max_tokens=None) -> LLMTextResult:
+        self.calls.append(
+            {
+                "messages": messages,
+                "model": model,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+            }
+        )
+        return LLMTextResult(text=self.text)
 
 
 class FakeDecisionService:
@@ -242,6 +260,49 @@ class AgentServiceTests(unittest.TestCase):
         self.assertEqual(reply.intent, "internal_calendar_action")
         self.assertEqual(self.calendar_service.reschedule_calls[0][1], "block-1")
         self.assertIn("Moved: Focus - Finish resume bullets.", reply.text)
+
+    def test_general_question_routes_to_llm_reply(self) -> None:
+        llm_client = FakeLLMClient(text="Paris is the capital of France.")
+        service = AgentService(
+            connection=None,
+            decision_service=self.decision_service,
+            task_service=self.task_service,
+            fatigue_service=self.fatigue_service,
+            internal_calendar_service=self.calendar_service,
+            llm_client=llm_client,
+        )
+
+        reply = service.handle_telegram_inbound(
+            user_id="user-1",
+            inbound=NormalizedTelegramInbound(update_type="message", text="What is the capital of France?"),
+        )
+
+        assert reply is not None
+        self.assertEqual(reply.intent, "general_chat")
+        self.assertEqual(reply.text, "Paris is the capital of France.")
+        self.assertEqual(len(self.decision_service.query_calls), 0)
+        self.assertEqual(llm_client.calls[0]["messages"][1].content, "What is the capital of France?")
+
+    def test_non_command_statement_routes_to_llm_reply(self) -> None:
+        llm_client = FakeLLMClient(text="I can help with that.")
+        service = AgentService(
+            connection=None,
+            decision_service=self.decision_service,
+            task_service=self.task_service,
+            fatigue_service=self.fatigue_service,
+            internal_calendar_service=self.calendar_service,
+            llm_client=llm_client,
+        )
+
+        reply = service.handle_telegram_inbound(
+            user_id="user-1",
+            inbound=NormalizedTelegramInbound(update_type="message", text="Tell me a quick joke"),
+        )
+
+        assert reply is not None
+        self.assertEqual(reply.intent, "general_chat")
+        self.assertEqual(reply.text, "I can help with that.")
+        self.assertEqual(len(self.decision_service.query_calls), 0)
 
 
 if __name__ == "__main__":

@@ -23,6 +23,7 @@ class InMemoryTelegramRepository:
             updated_at=datetime.now(UTC),
         )
         self.logged_events: list[dict] = []
+        self.processed_update_ids: set[str] = set()
 
     def get_connector(self, *, user_id: str) -> TelegramConnectorModel | None:
         return self.connector if self.connector.user_id == user_id else None
@@ -41,15 +42,29 @@ class InMemoryTelegramRepository:
         return self.connector
 
     def log_event(self, *, user_id: str, event_type: str, entity_id: str | None, payload=None) -> str:
+        payload_dict = payload or {}
         self.logged_events.append(
             {
                 "user_id": user_id,
                 "event_type": event_type,
                 "entity_id": entity_id,
-                "payload": payload or {},
+                "payload": payload_dict,
             }
         )
+        raw_update_id = payload_dict.get("raw_update_id")
+        if (
+            entity_id is not None
+            and raw_update_id is not None
+            and event_type in {"telegram_message_received", "telegram_callback_query_received"}
+        ):
+            self.processed_update_ids.add(f"{entity_id}:{raw_update_id}")
         return f"event-{len(self.logged_events)}"
+
+    def has_processed_update(self, *, user_id: str, entity_id: str, raw_update_id: int | str | None) -> bool:
+        _ = user_id
+        if raw_update_id is None:
+            return False
+        return f"{entity_id}:{raw_update_id}" in self.processed_update_ids
 
     def list_events(self, *, user_id: str, limit: int = 50) -> list[dict]:
         return []
@@ -480,6 +495,55 @@ class TelegramServiceTests(unittest.TestCase):
         self.assertTrue(sent)
         self.assertEqual(service.sent_messages[-1]["payload"]["chat_id"], 777)
         self.assertEqual(service.sent_messages[-1]["payload"]["text"], "You have a good 45-minute window right now.")
+
+    def test_duplicate_webhook_update_is_ignored(self) -> None:
+        repository = InMemoryTelegramRepository()
+        repository.connector.metadata_json.update(
+            {
+                "confirmation_status": "confirmed",
+                "telegram_chat_id": 777,
+                "telegram_user_id": 555,
+            }
+        )
+        user_repository = InMemoryUserRepository()
+        user_repository.preferences.profile_json = {"telegram_onboarding": {"active": False}}
+        agent_service = FakeAgentService(
+            TelegramAgentReply(
+                text="LLM reply",
+                intent="general_chat",
+            )
+        )
+        service = RecordingTelegramService(repository, user_repository, agent_service=agent_service)
+        update = {
+            "update_id": 455749056,
+            "message": {
+                "text": "Hello how are you",
+                "from": {"id": 555},
+                "chat": {"id": 777},
+            },
+        }
+
+        first = service.handle_webhook(
+            user_id="user-1",
+            update=update,
+            secret="secret-token",
+        )
+        second = service.handle_webhook(
+            user_id="user-1",
+            update=update,
+            secret="secret-token",
+        )
+
+        self.assertTrue(first.linked)
+        self.assertTrue(second.linked)
+        self.assertEqual(first.update_type, "message")
+        self.assertEqual(second.update_type, "message")
+        self.assertEqual(len(agent_service.calls), 1)
+        self.assertEqual(len(service.sent_messages), 1)
+        self.assertEqual(
+            [event["event_type"] for event in repository.logged_events],
+            ["telegram_message_received", "telegram_agent_reply_sent"],
+        )
 
 
 if __name__ == "__main__":
