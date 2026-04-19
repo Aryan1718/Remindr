@@ -25,6 +25,8 @@ class Settings(BaseModel):
     supabase_jwt_issuer: str | None = None
     supabase_jwks_url: str | None = None
     supabase_jwt_audience: str | None = "authenticated"
+    telegram_validate_bot_tokens: bool = False
+    telegram_default_webhook_base_url: str | None = None
 
     @computed_field  # type: ignore[prop-decorator]
     @property
