@@ -62,3 +62,17 @@ export interface SupabasePasswordSession {
   expires_in: number;
   user: SupabaseAuthUser;
 }
+
+export interface SupabaseSignupResponse {
+  access_token?: string;
+  refresh_token?: string;
+  token_type?: string;
+  expires_in?: number;
+  user?: SupabaseAuthUser | null;
+  session?: {
+    access_token?: string;
+    refresh_token?: string;
+    token_type?: string;
+    expires_in?: number;
+  } | null;
+}
