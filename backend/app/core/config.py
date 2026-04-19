@@ -16,10 +16,13 @@ class Settings(BaseModel):
     app_name: str = Field(default="Fatigue-Aware Personal Assistant Backend")
     environment: Literal["development", "staging", "production", "test"] = "development"
     debug: bool = True
-    api_prefix: str = "/api"
+    api_prefix: str = "/api/v1"
     log_level: str = "INFO"
     allowed_cors_origins: list[str] = Field(default_factory=list)
     database_url: str | None = None
+    supabase_url: str | None = None
+    supabase_jwt_secret: str | None = None
+    supabase_jwks_url: str | None = None
 
 
 def _parse_cors_origins(value: object) -> list[str]:
