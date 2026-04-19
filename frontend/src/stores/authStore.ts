@@ -5,6 +5,7 @@ import {
   persistSession,
   readStoredSession,
   signInWithPassword,
+  signUpWithPassword,
   syncSession,
   type StoredSession,
 } from "@/api/auth";
@@ -14,6 +15,14 @@ type AuthStatus = "loading" | "authenticated" | "unauthenticated";
 
 interface LoginPayload {
   email: string;
+  password: string;
+  rememberMe: boolean;
+}
+
+interface SignupPayload {
+  fullName: string;
+  email: string;
+  contact: string;
   password: string;
   rememberMe: boolean;
 }
@@ -31,6 +40,7 @@ interface AuthStore {
   error: string | null;
   initialize: () => Promise<void>;
   login: (payload: LoginPayload) => Promise<UserSnapshot>;
+  signup: (payload: SignupPayload) => Promise<{ snapshot: UserSnapshot | null; requiresEmailConfirmation: boolean }>;
   completeOAuthLogin: (payload: OAuthCallbackPayload) => Promise<UserSnapshot>;
   logout: () => void;
   clearError: () => void;
@@ -120,6 +130,62 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     } catch (error) {
       clearStoredSession();
       const message = error instanceof Error ? error.message : "Unable to sign in";
+      set({
+        status: "unauthenticated",
+        snapshot: null,
+        accessToken: null,
+        initialized: true,
+        error: message,
+      });
+      throw error;
+    }
+  },
+  async signup({ fullName, email, contact, password, rememberMe }) {
+    set({ status: "loading", error: null });
+
+    try {
+      const result = await signUpWithPassword(email, password, {
+        fullName,
+        contact,
+      });
+
+      if (!result.session) {
+        clearStoredSession();
+        set({
+          status: "unauthenticated",
+          snapshot: null,
+          accessToken: null,
+          initialized: true,
+          error: null,
+        });
+
+        return {
+          snapshot: null,
+          requiresEmailConfirmation: true,
+        };
+      }
+
+      const snapshot = await syncSession(result.session.accessToken, {
+        full_name: fullName,
+      });
+
+      persistSession(result.session, rememberMe);
+
+      set({
+        status: "authenticated",
+        snapshot,
+        accessToken: result.session.accessToken,
+        initialized: true,
+        error: null,
+      });
+
+      return {
+        snapshot,
+        requiresEmailConfirmation: false,
+      };
+    } catch (error) {
+      clearStoredSession();
+      const message = error instanceof Error ? error.message : "Unable to sign up";
       set({
         status: "unauthenticated",
         snapshot: null,

@@ -9,7 +9,12 @@ import {
   authFieldClassName,
   type AuthSocialProvider,
 } from "@/components/auth/AuthShell";
+import { getAuthErrorMessage, validateEmail, validatePassword } from "@/lib/authValidation";
 import { getPostLoginRoute, useAuthStore } from "@/stores/authStore";
+
+function fieldClass(hasError: boolean) {
+  return hasError ? `${authFieldClassName} border-red-400/60 focus:border-red-400/70 focus:ring-red-400/40` : authFieldClassName;
+}
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -20,6 +25,7 @@ export function LoginPage() {
   const [rememberMe, setRememberMe] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
   const [oauthPendingProvider, setOauthPendingProvider] = useState<SupportedOAuthProvider | null>(null);
   const authError = useAuthStore((state) => state.error);
   const clearAuthError = useAuthStore((state) => state.clearError);
@@ -67,17 +73,25 @@ export function LoginPage() {
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (submitDisabled) return;
+    const nextFieldErrors = {
+      email: validateEmail(email) ?? undefined,
+      password: validatePassword(password, { minimumLength: 6, required: true }) ?? undefined,
+    };
+
+    setFieldErrors(nextFieldErrors);
+    if (nextFieldErrors.email || nextFieldErrors.password) {
+      return;
+    }
 
     setIsSubmitting(true);
     setPageError(null);
     clearAuthError();
 
     try {
-      const snapshot = await login({ email, password, rememberMe });
+      const snapshot = await login({ email: email.trim(), password, rememberMe });
       navigate(redirectPath || getPostLoginRoute(snapshot), { replace: true });
     } catch (error) {
-      setPageError(error instanceof Error ? error.message : "Unable to sign in");
+      setPageError(getAuthErrorMessage(error, "Unable to sign in"));
     } finally {
       setIsSubmitting(false);
     }
@@ -111,15 +125,31 @@ export function LoginPage() {
             </div>
             <input
               autoComplete="email"
-              className={`${authFieldClassName} pl-10 pr-4 text-sm sm:text-base`}
+              className={`${fieldClass(Boolean(fieldErrors.email))} pl-10 pr-4 text-sm sm:text-base`}
               id="email"
-              onChange={(event) => setEmail(event.target.value)}
+              onBlur={() =>
+                setFieldErrors((current) => ({
+                  ...current,
+                  email: validateEmail(email) ?? undefined,
+                }))
+              }
+              onChange={(event) => {
+                setEmail(event.target.value);
+                if (fieldErrors.email || pageError) {
+                  setFieldErrors((current) => ({
+                    ...current,
+                    email: validateEmail(event.target.value) ?? undefined,
+                  }));
+                  setPageError(null);
+                }
+              }}
               placeholder="you@example.com"
               style={{ boxShadow: "inset 0 2px 4px rgba(0, 0, 0, 0.2)" }}
               type="email"
               value={email}
             />
           </div>
+          {fieldErrors.email ? <p className="mt-2 text-sm text-red-200">{fieldErrors.email}</p> : null}
         </div>
 
         <div>
@@ -132,9 +162,24 @@ export function LoginPage() {
             </div>
             <input
               autoComplete="current-password"
-              className={`${authFieldClassName} pl-10 pr-12 text-sm sm:text-base`}
+              className={`${fieldClass(Boolean(fieldErrors.password))} pl-10 pr-12 text-sm sm:text-base`}
               id="password"
-              onChange={(event) => setPassword(event.target.value)}
+              onBlur={() =>
+                setFieldErrors((current) => ({
+                  ...current,
+                  password: validatePassword(password, { minimumLength: 6, required: true }) ?? undefined,
+                }))
+              }
+              onChange={(event) => {
+                setPassword(event.target.value);
+                if (fieldErrors.password || pageError) {
+                  setFieldErrors((current) => ({
+                    ...current,
+                    password: validatePassword(event.target.value, { minimumLength: 6, required: true }) ?? undefined,
+                  }));
+                  setPageError(null);
+                }
+              }}
               placeholder="••••••••"
               style={{ boxShadow: "inset 0 2px 4px rgba(0, 0, 0, 0.2)" }}
               type={showPassword ? "text" : "password"}
@@ -149,6 +194,7 @@ export function LoginPage() {
               {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
             </button>
           </div>
+          {fieldErrors.password ? <p className="mt-2 text-sm text-red-200">{fieldErrors.password}</p> : null}
         </div>
 
         <div className="flex items-center justify-between gap-4">

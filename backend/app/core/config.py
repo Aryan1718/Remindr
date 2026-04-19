@@ -46,6 +46,9 @@ class Settings(BaseModel):
     llm_timeout_seconds: float = 20.0
     telegram_validate_bot_tokens: bool = False
     telegram_default_webhook_base_url: str | None = None
+    humandelta_base_url: str | None = "https://api.humandelta.ai"
+    humandelta_api_key: str | None = None
+    humandelta_timeout_seconds: float = 20.0
 
     @computed_field  # type: ignore[prop-decorator]
     @property

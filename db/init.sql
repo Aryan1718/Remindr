@@ -120,6 +120,39 @@ create table users (
   updated_at timestamptz not null default now()
 );
 
+create or replace function public.delete_app_user_for_auth_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  delete from public.users
+  where auth_user_id = old.id;
+
+  return old;
+end;
+$$;
+
+do $$
+begin
+  if to_regclass('auth.users') is not null
+    and not exists (
+      select 1
+      from pg_trigger
+      where tgname = 'on_auth_user_deleted_cleanup_app_user'
+        and tgrelid = 'auth.users'::regclass
+    ) then
+    execute '
+      create trigger on_auth_user_deleted_cleanup_app_user
+      after delete on auth.users
+      for each row
+      execute function public.delete_app_user_for_auth_user()
+    ';
+  end if;
+end;
+$$;
+
 create table user_preferences (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null unique references users(id) on delete cascade,

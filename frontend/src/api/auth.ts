@@ -3,6 +3,8 @@ import type {
   ApiErrorEnvelope,
   ApiSuccessEnvelope,
   SupabasePasswordSession,
+  SupabaseSignupResponse,
+  SupabaseAuthUser,
   UserSnapshot,
 } from "@/types/auth";
 
@@ -11,6 +13,11 @@ const SESSION_STORAGE_KEY = "remindr.auth.session";
 export interface StoredSession {
   accessToken: string;
   refreshToken: string | null;
+}
+
+export interface SignupResult {
+  session: StoredSession | null;
+  user: SupabaseAuthUser | null;
 }
 
 export class AuthApiError extends Error {
@@ -85,6 +92,48 @@ export async function signInWithPassword(email: string, password: string): Promi
       body: JSON.stringify({ email, password }),
     },
   );
+}
+
+export async function signUpWithPassword(
+  email: string,
+  password: string,
+  options: { fullName?: string; contact?: string } = {},
+): Promise<SignupResult> {
+  const response = await requestJson<SupabaseSignupResponse>(`${frontendEnv.supabaseUrl}/auth/v1/signup`, {
+    method: "POST",
+    headers: {
+      apikey: frontendEnv.supabaseAnonKey,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      email,
+      password,
+      data: {
+        full_name: options.fullName,
+        contact: options.contact,
+      },
+    }),
+  });
+
+  const sessionSource = response.session ?? response;
+  const accessToken =
+    typeof sessionSource.access_token === "string" && sessionSource.access_token.length > 0
+      ? sessionSource.access_token
+      : null;
+  const refreshToken =
+    typeof sessionSource.refresh_token === "string" && sessionSource.refresh_token.length > 0
+      ? sessionSource.refresh_token
+      : null;
+
+  return {
+    session: accessToken
+      ? {
+          accessToken,
+          refreshToken,
+        }
+      : null,
+    user: response.user ?? null,
+  };
 }
 
 export async function fetchUserSnapshot(accessToken: string): Promise<UserSnapshot> {
