@@ -16,6 +16,7 @@ from app.models.fatigue import (
     FatigueTrendDirection,
 )
 from app.repositories.fatigue import FatigueRepository
+from app.workers.rq import enqueue_memory_distillation
 
 
 def _resolve_timezone(name: str | None) -> ZoneInfo:
@@ -104,4 +105,14 @@ class FatigueAggregationWorker:
 def recompute_fatigue_patterns_job(*, database_url: str, user_id: str | None, days_back: int) -> list[FatiguePatternModel]:
     with psycopg.connect(database_url, row_factory=dict_row) as connection:
         worker = FatigueAggregationWorker(FatigueRepository(connection))
-        return worker.recompute_patterns(user_id=user_id, days_back=days_back)
+        patterns = worker.recompute_patterns(user_id=user_id, days_back=days_back)
+
+    for target_user_id in sorted({pattern.user_id for pattern in patterns}):
+        enqueue_memory_distillation(
+            user_id=target_user_id,
+            days_back=days_back,
+            trigger_source="fatigue_pattern_recompute",
+            entity_type="fatigue_pattern",
+        )
+
+    return patterns

@@ -6,7 +6,7 @@ from typing import Any, Protocol
 
 import psycopg
 
-from app.models.fatigue import FatigueCheckinModel, FatiguePatternModel, FatigueTimeBucket
+from app.models.fatigue import FatiguePatternModel, FatigueTimeBucket
 from app.models.internal_calendar import FeedbackResponseType
 from app.models.memory import LearnedMemoryModel, MemorySource, MemoryType
 from app.repositories.fatigue import FatigueRepository
@@ -109,7 +109,6 @@ class MemoryService:
         since = effective_now - timedelta(days=days_back)
         interaction_events = self.task_repository.list_recent_interaction_events(user_id=user_id, since=since, limit=300)
         calendar_feedback = self.calendar_repository.list_feedback_for_distillation(user_id=user_id, since=since, limit=300)
-        fatigue_checkins = self.fatigue_repository.list_checkins_for_aggregation(user_id=user_id, since=since)
         fatigue_patterns = self.fatigue_repository.list_patterns_for_distillation(
             user_id=user_id,
             min_confidence=0.45,
@@ -120,7 +119,6 @@ class MemoryService:
             user_id=user_id,
             interaction_events=interaction_events,
             calendar_feedback=calendar_feedback,
-            fatigue_checkins=fatigue_checkins,
             fatigue_patterns=fatigue_patterns,
             as_of=effective_now,
         )
@@ -165,7 +163,6 @@ class MemoryService:
         user_id: str,
         interaction_events: list[dict[str, Any]],
         calendar_feedback: list[dict[str, Any]],
-        fatigue_checkins: list[FatigueCheckinModel],
         fatigue_patterns: list[FatiguePatternModel],
         as_of: datetime,
     ) -> list[MemoryCandidate]:

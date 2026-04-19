@@ -101,6 +101,7 @@ class MemoryDistillationTests(unittest.TestCase):
         *,
         interaction_rows: list[dict] | None = None,
         feedback_rows: list[dict] | None = None,
+        checkins: list[FatigueCheckinModel] | None = None,
         patterns: list[FatiguePatternModel] | None = None,
     ) -> tuple[MemoryService, InMemoryMemoryRepository]:
         memory_repository = InMemoryMemoryRepository()
@@ -109,7 +110,7 @@ class MemoryDistillationTests(unittest.TestCase):
             memory_repository=memory_repository,
             task_repository=FakeTaskRepository(interaction_rows or []),
             calendar_repository=FakeCalendarRepository(feedback_rows or []),
-            fatigue_repository=FakeFatigueRepository([], patterns or []),
+            fatigue_repository=FakeFatigueRepository(checkins or [], patterns or []),
         )
         return service, memory_repository
 
@@ -236,6 +237,27 @@ class MemoryDistillationTests(unittest.TestCase):
                     "payload_json": {"fatigue_score": 4},
                     "created_at": base,
                 }
+            ]
+        )
+
+        stored = service.distill_memories_for_user(user_id="user-1", days_back=30, as_of=base + timedelta(days=1))
+
+        self.assertEqual(stored, [])
+        self.assertEqual(repository.memories, [])
+
+    def test_single_raw_fatigue_checkin_does_not_create_memory(self) -> None:
+        base = datetime(2026, 4, 19, 9, 0, tzinfo=UTC)
+        service, repository = self.build_service(
+            checkins=[
+                FatigueCheckinModel(
+                    id="c1",
+                    user_id="user-1",
+                    score=5,
+                    source="user",
+                    notes="Tired",
+                    context_json={},
+                    created_at=base,
+                )
             ]
         )
 

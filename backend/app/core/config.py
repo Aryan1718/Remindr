@@ -33,6 +33,7 @@ class Settings(BaseModel):
         "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/calendar.readonly"
     )
     connector_sync_eager: bool = True
+    memory_distillation_eager: bool = True
     notification_delivery_eager: bool = True
     llm_provider: str = "gemini"
     llm_api_key: str | None = None
