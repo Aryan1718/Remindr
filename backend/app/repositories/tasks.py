@@ -155,6 +155,51 @@ class TaskRepository:
 
         return [TaskModel.from_record(record) for record in records]
 
+    def list_deadline_watch_candidates(
+        self,
+        *,
+        due_before: datetime,
+        user_id: str | None = None,
+        limit: int = 200,
+    ) -> list[TaskModel]:
+        clauses: list[sql.Composed] = [
+            sql.SQL("status = any(%s)"),
+            sql.SQL("due_at is not null"),
+            sql.SQL("due_at <= %s"),
+        ]
+        params: list[Any] = [
+            [
+                TaskStatus.PENDING.value,
+                TaskStatus.SCHEDULED.value,
+                TaskStatus.IN_PROGRESS.value,
+            ],
+            due_before,
+        ]
+
+        if user_id is not None:
+            clauses.insert(0, sql.SQL("user_id = %s"))
+            params.insert(0, user_id)
+
+        query = sql.SQL(
+            """
+            select {columns}
+            from tasks
+            where {where_clause}
+            order by due_at asc, priority desc, created_at asc
+            limit %s
+            """
+        ).format(
+            columns=sql.SQL(TASK_COLUMNS),
+            where_clause=sql.SQL(" and ").join(clauses),
+        )
+        params.append(limit)
+
+        with self.connection.cursor() as cursor:
+            cursor.execute(query, params)
+            records = cursor.fetchall()
+
+        return [TaskModel.from_record(record) for record in records]
+
     def get_task(self, task_id: str, user_id: str) -> TaskModel | None:
         with self.connection.cursor() as cursor:
             cursor.execute(
