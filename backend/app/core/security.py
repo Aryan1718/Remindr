@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
+import ssl
 from typing import Any
 
 import jwt
@@ -34,8 +35,19 @@ def _unauthorized(code: str, message: str) -> HTTPException:
 
 
 @lru_cache(maxsize=1)
+def _build_ssl_context() -> ssl.SSLContext:
+    # Prefer the certifi CA bundle when available to avoid local certificate store issues.
+    try:
+        import certifi
+
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        return ssl.create_default_context()
+
+
+@lru_cache(maxsize=1)
 def _get_jwk_client(jwks_url: str) -> jwt.PyJWKClient:
-    return jwt.PyJWKClient(jwks_url)
+    return jwt.PyJWKClient(jwks_url, ssl_context=_build_ssl_context())
 
 
 def _get_jwks_url(settings: Settings) -> str | None:
@@ -64,11 +76,16 @@ def _decode_token(token: str, settings: Settings) -> dict:
     if not jwks_url:
         raise RuntimeError("Supabase JWT verification is not configured")
 
+    token_header = jwt.get_unverified_header(token)
+    token_alg = token_header.get("alg")
+    if not token_alg:
+        raise InvalidTokenError("Token header is missing alg")
+
     signing_key = _get_jwk_client(jwks_url).get_signing_key_from_jwt(token)
     return jwt.decode(
         token,
         signing_key.key,
-        algorithms=["RS256"],
+        algorithms=[token_alg],
         audience=settings.supabase_jwt_audience,
         issuer=settings.resolved_supabase_jwt_issuer,
         options=_decode_options(settings),
