@@ -1,7 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Eye, EyeOff, Lock, Mail } from "lucide-react";
-import { Link, useNavigate } from "react-router-dom";
-import { useOnboardingQuery } from "@/features/onboarding/queries";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { beginSupabaseOAuth, type SupportedOAuthProvider } from "@/api/supabase";
+import { getPostLoginRoute, useAuthStore } from "@/stores/authStore";
 
 const blobStyles = [
   {
@@ -94,22 +95,81 @@ const socialButtonClassName =
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const { data, isLoading } = useOnboardingQuery();
+  const [searchParams] = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [pageError, setPageError] = useState<string | null>(null);
+  const [oauthPendingProvider, setOauthPendingProvider] = useState<SupportedOAuthProvider | null>(null);
+  const authError = useAuthStore((state) => state.error);
+  const clearAuthError = useAuthStore((state) => state.clearError);
+  const completeOAuthLogin = useAuthStore((state) => state.completeOAuthLogin);
+  const login = useAuthStore((state) => state.login);
 
   const submitDisabled = useMemo(
-    () => isLoading || email.trim().length === 0 || password.trim().length === 0,
-    [email, isLoading, password],
+    () => isSubmitting || email.trim().length === 0 || password.trim().length === 0,
+    [email, isSubmitting, password],
   );
 
-  function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  const redirectPath = searchParams.get("redirect");
+
+  useEffect(() => {
+    if (authError) {
+      setPageError(authError);
+    }
+  }, [authError]);
+
+  useEffect(() => {
+    const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    const accessToken = hashParams.get("access_token");
+
+    if (!accessToken) {
+      return;
+    }
+
+    const refreshToken = hashParams.get("refresh_token");
+    setIsSubmitting(true);
+    setPageError(null);
+
+    void completeOAuthLogin({ accessToken, refreshToken })
+      .then((snapshot) => {
+        window.history.replaceState(null, "", window.location.pathname + window.location.search);
+        navigate(redirectPath || getPostLoginRoute(snapshot), { replace: true });
+      })
+      .catch((error) => {
+        setPageError(error instanceof Error ? error.message : "Unable to complete sign in");
+      })
+      .finally(() => {
+        setIsSubmitting(false);
+        setOauthPendingProvider(null);
+      });
+  }, [completeOAuthLogin, navigate, redirectPath]);
+
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (submitDisabled) return;
 
-    navigate(data?.completed ? "/dashboard" : "/onboarding");
+    setIsSubmitting(true);
+    setPageError(null);
+    clearAuthError();
+
+    try {
+      const snapshot = await login({ email, password, rememberMe });
+      navigate(redirectPath || getPostLoginRoute(snapshot), { replace: true });
+    } catch (error) {
+      setPageError(error instanceof Error ? error.message : "Unable to sign in");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  function handleOAuth(provider: SupportedOAuthProvider) {
+    setIsSubmitting(true);
+    setPageError(null);
+    setOauthPendingProvider(provider);
+    beginSupabaseOAuth(provider);
   }
 
   return (
@@ -187,6 +247,12 @@ export function LoginPage() {
             </div>
 
             <form className="relative space-y-7" onSubmit={handleSubmit}>
+              {pageError ? (
+                <div className="rounded-2xl border border-red-400/25 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+                  {pageError}
+                </div>
+              ) : null}
+
               <div>
                 <label className="mb-3 block text-sm font-medium text-gray-300 sm:text-base" htmlFor="email">
                   Email
@@ -264,7 +330,7 @@ export function LoginPage() {
                 }}
                 type="submit"
               >
-                {isLoading ? "Checking account..." : "Sign In"}
+                {isSubmitting ? "Signing in..." : "Sign In"}
               </button>
 
               <div className="relative my-6">
@@ -281,11 +347,16 @@ export function LoginPage() {
                   <button
                     className={`${socialButtonClassName} sm:py-[1.1rem] sm:text-base`}
                     key={provider.id}
+                    onClick={() => handleOAuth(provider.id as SupportedOAuthProvider)}
                     type="button"
                   >
                     <span className="flex items-center justify-center gap-3">
                       {provider.icon}
-                      <span>{provider.label}</span>
+                      <span>
+                        {oauthPendingProvider === provider.id && isSubmitting
+                          ? "Redirecting..."
+                          : provider.label}
+                      </span>
                     </span>
                   </button>
                 ))}
