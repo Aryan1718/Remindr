@@ -50,7 +50,7 @@ class TelegramRepository:
         self,
         *,
         user_id: str,
-        bot_token: str,
+        bot_token: str | None,
         status: ConnectorStatus,
         metadata: dict[str, Any],
         account_email: str | None = "telegram-bot",

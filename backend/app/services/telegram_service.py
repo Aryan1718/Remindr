@@ -24,11 +24,11 @@ class TelegramService:
         self.repository = TelegramRepository(connection)
         self.settings = settings or get_settings()
 
-    def connect_bot(self, payload: TelegramConnectRequest) -> TelegramConnectionRead:
+    def connect_bot(self, *, user_id: str, payload: TelegramConnectRequest) -> TelegramConnectionRead:
         token = payload.bot_token.strip()
         self._validate_token_shape(token)
 
-        existing = self.repository.get_connector(user_id=payload.user_id)
+        existing = self.repository.get_connector(user_id=user_id)
         existing_metadata = existing.metadata_json if existing else {}
         bot_profile = self._fetch_bot_profile(token) if self.settings.telegram_validate_bot_tokens else {}
         webhook_secret = existing_metadata.get("webhook_secret") or secrets.token_urlsafe(24)
@@ -48,19 +48,21 @@ class TelegramService:
 
         webhook_base_url = payload.webhook_base_url or self.settings.telegram_default_webhook_base_url
         if webhook_base_url:
-            webhook_url = self._build_webhook_url(webhook_base_url, payload.user_id)
+            webhook_url = self._build_webhook_url(webhook_base_url, user_id)
             self._set_webhook(token, webhook_url, webhook_secret)
             metadata["webhook_url"] = webhook_url
             metadata["webhook_status"] = "configured"
 
         connector = self.repository.upsert_connector(
-            user_id=payload.user_id,
-            bot_token=token,
+            user_id=user_id,
+            # Do not persist Telegram bot tokens in plaintext in a column named
+            # "access_token_encrypted" until real encryption/key management exists.
+            bot_token=None,
             status=ConnectorStatus.CONNECTED,
             metadata=metadata,
         )
         self.repository.log_event(
-            user_id=payload.user_id,
+            user_id=user_id,
             event_type="telegram_bot_connected",
             entity_id=connector.id,
             payload={
@@ -202,4 +204,4 @@ class TelegramService:
     def _build_webhook_url(self, webhook_base_url: str, user_id: str) -> str:
         normalized_base = webhook_base_url.rstrip("/")
         encoded_user_id = parse.quote(user_id, safe="")
-        return f"{normalized_base}/api/v1/telegram/webhook/{encoded_user_id}"
+        return f"{normalized_base}{self.settings.api_prefix}/telegram/webhook/{encoded_user_id}"

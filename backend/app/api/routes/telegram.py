@@ -6,6 +6,7 @@ import psycopg
 from fastapi import APIRouter, Depends, Header, status
 
 from app.core.db import get_db_connection
+from app.core.security import AuthenticatedUser, get_current_user
 from app.schemas.telegram import (
     TelegramConnectionEnvelope,
     TelegramEventListEnvelope,
@@ -24,27 +25,28 @@ def get_telegram_service(connection: psycopg.Connection = Depends(get_db_connect
 @router.post("/bots/connect", response_model=TelegramConnectionEnvelope, status_code=status.HTTP_201_CREATED)
 def connect_telegram_bot(
     payload: TelegramConnectRequest,
+    current_user: AuthenticatedUser = Depends(get_current_user),
     service: TelegramService = Depends(get_telegram_service),
 ) -> TelegramConnectionEnvelope:
-    connection = service.connect_bot(payload)
+    connection = service.connect_bot(user_id=current_user.user_id, payload=payload)
     return TelegramConnectionEnvelope(data={"connection": connection}, message="Telegram bot connected")
 
 
-@router.get("/bots/{user_id}", response_model=TelegramConnectionEnvelope)
+@router.get("/bots/me", response_model=TelegramConnectionEnvelope)
 def get_telegram_connection(
-    user_id: str,
+    current_user: AuthenticatedUser = Depends(get_current_user),
     service: TelegramService = Depends(get_telegram_service),
 ) -> TelegramConnectionEnvelope:
-    connection = service.get_connection(user_id=user_id)
+    connection = service.get_connection(user_id=current_user.user_id)
     return TelegramConnectionEnvelope(data={"connection": connection})
 
 
-@router.get("/bots/{user_id}/events", response_model=TelegramEventListEnvelope)
+@router.get("/bots/me/events", response_model=TelegramEventListEnvelope)
 def list_telegram_events(
-    user_id: str,
+    current_user: AuthenticatedUser = Depends(get_current_user),
     service: TelegramService = Depends(get_telegram_service),
 ) -> TelegramEventListEnvelope:
-    events = service.list_events(user_id=user_id)
+    events = service.list_events(user_id=current_user.user_id)
     return TelegramEventListEnvelope(data={"items": events}, meta={"count": len(events)})
 
 
