@@ -16,11 +16,10 @@ def _strip_or_none(value: str | None) -> str | None:
 
 
 class TelegramConnectRequest(BaseModel):
-    user_id: str = Field(min_length=1, max_length=128)
     bot_token: str = Field(min_length=10, max_length=256)
     webhook_base_url: str | None = Field(default=None, max_length=512)
 
-    @field_validator("user_id", "bot_token", "webhook_base_url")
+    @field_validator("bot_token", "webhook_base_url")
     @classmethod
     def normalize_strings(cls, value: str | None) -> str | None:
         return _strip_or_none(value)

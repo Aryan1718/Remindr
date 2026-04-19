@@ -2,8 +2,6 @@ import { requestJson, simulateRequest } from "@/api/client";
 import { getDb, updateDb } from "@/mocks/db";
 import type { Integration } from "@/types/domain";
 
-const DEMO_USER_ID = "demo-user";
-
 interface TelegramConnectionResponse {
   success: boolean;
   data: {
@@ -22,9 +20,23 @@ interface TelegramConnectionResponse {
   };
 }
 
+interface CurrentUserResponse {
+  success: boolean;
+  data: {
+    user: {
+      id: string;
+    };
+  };
+}
+
 interface TelegramConnectPayload {
   botToken: string;
   webhookBaseUrl?: string;
+}
+
+async function getCurrentUserId() {
+  const response = await requestJson<CurrentUserResponse>("/me");
+  return response.data.user.id;
 }
 
 function formatTelegramIntegration(
@@ -58,7 +70,7 @@ function formatTelegramIntegration(
 
 async function fetchTelegramConnection() {
   try {
-    const response = await requestJson<TelegramConnectionResponse>(`/telegram/bots/${DEMO_USER_ID}`);
+    const response = await requestJson<TelegramConnectionResponse>("/telegram/bots/me");
     return response.data.connection;
   } catch {
     return null;
@@ -98,10 +110,10 @@ export function saveIntegration(integration: Integration) {
 }
 
 export async function connectTelegramBot({ botToken, webhookBaseUrl }: TelegramConnectPayload) {
+  await getCurrentUserId()
   const response = await requestJson<TelegramConnectionResponse>("/telegram/bots/connect", {
     method: "POST",
     body: JSON.stringify({
-      user_id: DEMO_USER_ID,
       bot_token: botToken,
       webhook_base_url: webhookBaseUrl || undefined,
     }),

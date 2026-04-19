@@ -100,8 +100,8 @@ export function IntegrationsPage() {
               value={webhookBaseUrl}
             />
             <p className="text-sm leading-6 text-muted">
-              The backend will register <span className="font-medium text-ink">/api/v1/telegram/webhook/demo-user</span>{" "}
-              under this base URL.
+              The backend will register a Telegram webhook under this base URL using the backend API prefix and your
+              authenticated internal user id.
             </p>
           </div>
           <div className="rounded-panel border border-border bg-black/20 px-4 py-3 text-sm leading-6 text-muted">
