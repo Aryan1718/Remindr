@@ -18,6 +18,7 @@ from app.models.telegram import ConnectorStatus, TelegramConnectorModel
 from app.repositories.telegram import TelegramRepository
 from app.repositories.users import UserRepository
 from app.schemas.telegram import TelegramConnectRequest, TelegramConnectionRead, TelegramEventRead, TelegramWebhookResult
+from app.services.agent_service import AgentService, NormalizedTelegramInbound, TelegramAgentReply
 
 logger = logging.getLogger("app.services.telegram")
 
@@ -79,10 +80,12 @@ class TelegramService:
         settings: Settings | None = None,
         repository: TelegramRepository | None = None,
         user_repository: UserRepository | None = None,
+        agent_service: AgentService | None = None,
     ) -> None:
         self.repository = repository or TelegramRepository(connection)
         self.user_repository = user_repository or UserRepository(connection)
         self.settings = settings or get_settings()
+        self.agent_service = agent_service or (AgentService(connection, settings=self.settings) if connection is not None else None)
 
     def connect_bot(self, *, user_id: str, payload: TelegramConnectRequest) -> TelegramConnectionRead:
         token = payload.bot_token.strip()
@@ -184,6 +187,7 @@ class TelegramService:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid Telegram webhook secret")
 
         parsed_update = self._extract_update(update)
+        onboarding_active = self._is_onboarding_active(user_id) if self._is_confirmed(metadata) else False
         if parsed_update["update_type"] == "message" and parsed_update.get("text"):
             self.repository.log_event(
                 user_id=user_id,
@@ -221,6 +225,13 @@ class TelegramService:
             event_type=f"telegram_{parsed_update['update_type']}_received",
             entity_id=updated_connector.id,
             payload=parsed_update,
+        )
+        self._maybe_handle_agent_interaction(
+            user_id=user_id,
+            connector=updated_connector,
+            metadata=metadata,
+            parsed_update=parsed_update,
+            onboarding_active=onboarding_active,
         )
 
         return TelegramWebhookResult(
@@ -539,6 +550,14 @@ class TelegramService:
     def _is_confirmed(self, metadata: dict[str, Any]) -> bool:
         return metadata.get("confirmation_status") == CONFIRMATION_CONFIRMED and metadata.get("telegram_chat_id") is not None
 
+    def _is_onboarding_active(self, user_id: str) -> bool:
+        preferences = self.user_repository.get_preferences(user_id)
+        if preferences is None:
+            return False
+        profile_json = dict(preferences.profile_json or {})
+        onboarding_state = dict(profile_json.get("telegram_onboarding") or {})
+        return bool(onboarding_state.get("active"))
+
     def _parse_time_value(self, value: str) -> str:
         parts = value.split(":")
         if len(parts) != 2 or not all(part.isdigit() for part in parts):
@@ -575,6 +594,60 @@ class TelegramService:
         self._telegram_request(
             token,
             "sendMessage",
+            payload,
+        )
+
+    def send_linked_message(
+        self,
+        *,
+        user_id: str,
+        text: str,
+        reply_markup: dict[str, Any] | None = None,
+        include_result: bool = False,
+    ) -> bool | dict[str, Any]:
+        connector = self.repository.get_connector(user_id=user_id)
+        if connector is None:
+            return False
+        metadata = dict(connector.metadata_json or {})
+        if not self._is_confirmed(metadata):
+            return False
+        chat_id = metadata.get("telegram_chat_id")
+        if not isinstance(chat_id, int):
+            return False
+        token = connector.access_token_encrypted
+        if not token:
+            return False
+        payload: dict[str, Any] = {
+            "chat_id": chat_id,
+            "text": text,
+        }
+        if reply_markup is not None:
+            payload["reply_markup"] = reply_markup
+        response = self._telegram_request(
+            token,
+            "sendMessage",
+            payload,
+        )
+        self.repository.log_event(
+            user_id=user_id,
+            event_type="telegram_outbound_message_sent",
+            entity_id=connector.id,
+            payload={"text": text},
+        )
+        if include_result:
+            return response
+        return True
+
+    def _answer_callback_query(self, *, connector: TelegramConnectorModel, callback_query_id: str, text: str | None = None) -> None:
+        token = connector.access_token_encrypted
+        if not token:
+            return
+        payload: dict[str, Any] = {"callback_query_id": callback_query_id}
+        if text:
+            payload["text"] = text
+        self._telegram_request(
+            token,
+            "answerCallbackQuery",
             payload,
         )
 
@@ -631,6 +704,7 @@ class TelegramService:
                 "telegram_chat_id": chat.get("id"),
                 "text": message.get("text"),
                 "callback_data": callback.get("data"),
+                "callback_query_id": callback.get("id"),
                 "raw_update_id": update.get("update_id"),
             }
 
@@ -718,3 +792,75 @@ class TelegramService:
         normalized_base = webhook_base_url.rstrip("/")
         encoded_user_id = parse.quote(user_id, safe="")
         return f"{normalized_base}{self.settings.api_prefix}/telegram/webhook/{encoded_user_id}"
+
+    def _maybe_handle_agent_interaction(
+        self,
+        *,
+        user_id: str,
+        connector: TelegramConnectorModel,
+        metadata: dict[str, Any],
+        parsed_update: dict[str, Any],
+        onboarding_active: bool,
+    ) -> None:
+        if self.agent_service is None or not self._is_confirmed(metadata):
+            return
+
+        if parsed_update["update_type"] == "message":
+            message_text = (parsed_update.get("text") or "").strip()
+            if not message_text or message_text.lower() == "/start" or onboarding_active:
+                return
+        elif parsed_update["update_type"] != "callback_query":
+            return
+
+        reply = self.agent_service.handle_telegram_inbound(
+            user_id=user_id,
+            inbound=NormalizedTelegramInbound(
+                update_type=parsed_update["update_type"],
+                text=parsed_update.get("text"),
+                callback_data=parsed_update.get("callback_data"),
+                callback_query_id=parsed_update.get("callback_query_id"),
+                telegram_chat_id=parsed_update.get("telegram_chat_id"),
+                telegram_user_id=parsed_update.get("telegram_user_id"),
+            ),
+        )
+        if reply is None:
+            return
+        self._dispatch_agent_reply(
+            user_id=user_id,
+            connector=connector,
+            parsed_update=parsed_update,
+            reply=reply,
+        )
+
+    def _dispatch_agent_reply(
+        self,
+        *,
+        user_id: str,
+        connector: TelegramConnectorModel,
+        parsed_update: dict[str, Any],
+        reply: TelegramAgentReply,
+    ) -> None:
+        chat_id = parsed_update.get("telegram_chat_id")
+        if isinstance(chat_id, int):
+            self._send_message(
+                connector=connector,
+                chat_id=chat_id,
+                text=reply.text,
+                reply_markup=reply.reply_markup,
+            )
+        callback_query_id = parsed_update.get("callback_query_id")
+        if isinstance(callback_query_id, str) and callback_query_id:
+            self._answer_callback_query(
+                connector=connector,
+                callback_query_id=callback_query_id,
+                text=reply.callback_notice,
+            )
+        self.repository.log_event(
+            user_id=user_id,
+            event_type="telegram_agent_reply_sent",
+            entity_id=connector.id,
+            payload={
+                "intent": reply.intent,
+                "text": reply.text,
+            },
+        )

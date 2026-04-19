@@ -7,6 +7,8 @@ from app.models.internal_calendar import (
     FeedbackResponseType,
     InternalCalendarBlockModel,
 )
+from app.models.memory import LearnedMemoryModel, MemorySource, MemoryType
+from app.models.notification import NotificationChannel, NotificationModel, NotificationStatus
 from app.models.task import TaskModel, TaskStatus
 from app.models.user import UserModel, UserPreferencesModel
 
@@ -19,6 +21,12 @@ __all__ = [
     "ExternalCalendarEventModel",
     "FeedbackResponseType",
     "InternalCalendarBlockModel",
+    "LearnedMemoryModel",
+    "MemorySource",
+    "MemoryType",
+    "NotificationChannel",
+    "NotificationModel",
+    "NotificationStatus",
     "TaskModel",
     "TaskStatus",
     "UserModel",

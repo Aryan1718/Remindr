@@ -33,6 +33,12 @@ class Settings(BaseModel):
         "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/calendar.readonly"
     )
     connector_sync_eager: bool = True
+    notification_delivery_eager: bool = True
+    llm_provider: str = "gemini"
+    llm_api_key: str | None = None
+    llm_model: str | None = "gemini-2.5-flash"
+    llm_base_url: str | None = None
+    llm_timeout_seconds: float = 20.0
     telegram_validate_bot_tokens: bool = False
     telegram_default_webhook_base_url: str | None = None
 
@@ -67,6 +73,15 @@ class Settings(BaseModel):
     def resolved_google_oauth_scopes(self) -> list[str]:
         raw_scopes = self.google_oauth_scopes.replace(",", " ")
         return [item.strip() for item in raw_scopes.split() if item.strip()]
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def resolved_llm_base_url(self) -> str | None:
+        if self.llm_base_url:
+            return self.llm_base_url.rstrip("/")
+        if self.llm_provider.lower() == "gemini":
+            return "https://generativelanguage.googleapis.com/v1beta/openai"
+        return None
 
 
 def _parse_cors_origins(value: object) -> list[str]:
