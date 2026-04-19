@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Literal
 
 from dotenv import dotenv_values
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 BASE_DIR = Path(__file__).resolve().parents[2]
 ENV_FILE = BASE_DIR / ".env"
@@ -22,7 +22,28 @@ class Settings(BaseModel):
     database_url: str | None = None
     supabase_url: str | None = None
     supabase_jwt_secret: str | None = None
+    supabase_jwt_issuer: str | None = None
     supabase_jwks_url: str | None = None
+    supabase_jwt_audience: str | None = "authenticated"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def resolved_supabase_jwt_issuer(self) -> str | None:
+        if self.supabase_jwt_issuer:
+            return self.supabase_jwt_issuer.rstrip("/")
+        if self.supabase_url:
+            return f"{self.supabase_url.rstrip('/')}/auth/v1"
+        return None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def resolved_supabase_jwks_url(self) -> str | None:
+        if self.supabase_jwks_url:
+            return self.supabase_jwks_url
+        issuer = self.resolved_supabase_jwt_issuer
+        if issuer:
+            return f"{issuer}/.well-known/jwks.json"
+        return None
 
 
 def _parse_cors_origins(value: object) -> list[str]:
