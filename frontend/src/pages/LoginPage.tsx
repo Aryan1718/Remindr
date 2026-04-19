@@ -75,7 +75,7 @@ export function LoginPage() {
     event.preventDefault();
     const nextFieldErrors = {
       email: validateEmail(email) ?? undefined,
-      password: validatePassword(password, { minimumLength: 6, required: true }) ?? undefined,
+      password: validatePassword(password, { required: true }) ?? undefined,
     };
 
     setFieldErrors(nextFieldErrors);
@@ -167,7 +167,7 @@ export function LoginPage() {
               onBlur={() =>
                 setFieldErrors((current) => ({
                   ...current,
-                  password: validatePassword(password, { minimumLength: 6, required: true }) ?? undefined,
+                  password: validatePassword(password, { required: true }) ?? undefined,
                 }))
               }
               onChange={(event) => {
@@ -175,7 +175,7 @@ export function LoginPage() {
                 if (fieldErrors.password || pageError) {
                   setFieldErrors((current) => ({
                     ...current,
-                    password: validatePassword(event.target.value, { minimumLength: 6, required: true }) ?? undefined,
+                    password: validatePassword(event.target.value, { required: true }) ?? undefined,
                   }));
                   setPageError(null);
                 }

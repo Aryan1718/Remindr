@@ -1,7 +1,14 @@
 import { useMemo, useState } from "react";
 import { Eye, EyeOff, Lock, Mail, Phone, User } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
-import { AuthHeader, AuthShell, AuthSocialButtons, authFieldClassName } from "@/components/auth/AuthShell";
+import { beginSupabaseOAuth, type SupportedOAuthProvider } from "@/api/supabase";
+import {
+  AuthHeader,
+  AuthShell,
+  AuthSocialButtons,
+  authFieldClassName,
+  type AuthSocialProvider,
+} from "@/components/auth/AuthShell";
 import { getAuthErrorMessage, validateEmail, validatePassword, validateRequired } from "@/lib/authValidation";
 import { getPostLoginRoute, useAuthStore } from "@/stores/authStore";
 
@@ -22,6 +29,7 @@ export function SignupPage() {
   const [pageError, setPageError] = useState<string | null>(null);
   const [pageMessage, setPageMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [oauthPendingProvider, setOauthPendingProvider] = useState<SupportedOAuthProvider | null>(null);
   const [fieldErrors, setFieldErrors] = useState<{
     fullName?: string;
     email?: string;
@@ -45,7 +53,7 @@ export function SignupPage() {
       fullName: validateRequired(fullName, "Full name") ?? undefined,
       email: validateEmail(email) ?? undefined,
       contact: validateRequired(contact, "Contact") ?? undefined,
-      password: validatePassword(password, { minimumLength: 6, required: true }) ?? undefined,
+      password: validatePassword(password, { required: true }) ?? undefined,
     };
 
     setFieldErrors(nextFieldErrors);
@@ -78,6 +86,18 @@ export function SignupPage() {
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  function handleOAuth(provider: AuthSocialProvider) {
+    if (provider !== "google") {
+      return;
+    }
+
+    setIsSubmitting(true);
+    setPageError(null);
+    setPageMessage(null);
+    setOauthPendingProvider(provider);
+    beginSupabaseOAuth(provider);
   }
 
   return (
@@ -226,7 +246,7 @@ export function SignupPage() {
               onBlur={() =>
                 setFieldErrors((current) => ({
                   ...current,
-                  password: validatePassword(password, { minimumLength: 6, required: true }) ?? undefined,
+                  password: validatePassword(password, { required: true }) ?? undefined,
                 }))
               }
               onChange={(event) => {
@@ -234,7 +254,7 @@ export function SignupPage() {
                 if (fieldErrors.password || pageError) {
                   setFieldErrors((current) => ({
                     ...current,
-                    password: validatePassword(event.target.value, { minimumLength: 6, required: true }) ?? undefined,
+                    password: validatePassword(event.target.value, { required: true }) ?? undefined,
                   }));
                   setPageError(null);
                 }
@@ -255,7 +275,7 @@ export function SignupPage() {
           </div>
           {fieldErrors.password ? <p className="mt-2 text-sm text-red-200">{fieldErrors.password}</p> : null}
           {!fieldErrors.password ? (
-            <p className="mt-2 text-sm text-gray-400">Use at least 6 characters to meet Supabase password rules.</p>
+            <p className="mt-2 text-sm text-gray-400">Use any password for now. Server-side auth rules still apply.</p>
           ) : null}
         </div>
 
@@ -273,7 +293,13 @@ export function SignupPage() {
           {isSubmitting ? "Creating account..." : "Create Account"}
         </button>
 
-        <AuthSocialButtons mode="signup" />
+        <AuthSocialButtons
+          busy={isSubmitting}
+          mode="signup"
+          onSelect={handleOAuth}
+          pendingProvider={oauthPendingProvider}
+          providers={["google"]}
+        />
       </form>
 
       <div className="relative mt-5 text-center sm:mt-6">
