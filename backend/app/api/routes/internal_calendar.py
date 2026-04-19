@@ -6,9 +6,11 @@ from fastapi import APIRouter, Depends, status
 from app.core.db import get_db_connection
 from app.core.security import AuthenticatedUser, get_current_user
 from app.schemas.internal_calendar import (
+    CalendarFeedbackEnvelope,
     InternalCalendarCompleteRequest,
     InternalCalendarConfirmRequest,
     InternalCalendarDetailEnvelope,
+    InternalCalendarFeedbackCreateRequest,
     InternalCalendarListEnvelope,
     InternalCalendarListFilters,
     InternalCalendarMutationEnvelope,
@@ -118,4 +120,18 @@ def complete_block(
     return InternalCalendarMutationEnvelope(
         data={"block": block, "task": task},
         message="Calendar block completed",
+    )
+
+
+@router.post("/{block_id}/feedback", response_model=CalendarFeedbackEnvelope, status_code=status.HTTP_201_CREATED)
+def create_feedback(
+    block_id: str,
+    payload: InternalCalendarFeedbackCreateRequest,
+    current_user: AuthenticatedUser = Depends(get_current_user),
+    service: InternalCalendarService = Depends(get_internal_calendar_service),
+) -> CalendarFeedbackEnvelope:
+    feedback = service.create_feedback(user_id=current_user.user_id, block_id=block_id, payload=payload)
+    return CalendarFeedbackEnvelope(
+        data={"feedback": feedback},
+        message="Calendar feedback recorded",
     )

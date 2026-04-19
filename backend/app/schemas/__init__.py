@@ -1,3 +1,12 @@
+from app.schemas.connector import (
+    ConnectorConnectRequest,
+    ConnectorEnvelope,
+    ConnectorListEnvelope,
+    ConnectorOAuthStartRead,
+    ConnectorRead,
+    ConnectorSyncRequest,
+    ConnectorSyncTriggered,
+)
 from app.schemas.task import (
     CompleteTaskRequest,
     TaskCreateRequest,
@@ -8,11 +17,13 @@ from app.schemas.task import (
     TaskUpdateRequest,
 )
 from app.schemas.internal_calendar import (
+    CalendarFeedbackEnvelope,
     CalendarFeedbackRead,
     InternalCalendarBlockRead,
     InternalCalendarCompleteRequest,
     InternalCalendarConfirmRequest,
     InternalCalendarDetailEnvelope,
+    InternalCalendarFeedbackCreateRequest,
     InternalCalendarListEnvelope,
     InternalCalendarListFilters,
     InternalCalendarMutationEnvelope,
@@ -24,12 +35,21 @@ from app.schemas.internal_calendar import (
 from app.schemas.user import PreferencesResponse, UserResponse, UserSnapshotResponse
 
 __all__ = [
+    "CalendarFeedbackEnvelope",
     "CalendarFeedbackRead",
     "CompleteTaskRequest",
+    "ConnectorConnectRequest",
+    "ConnectorEnvelope",
+    "ConnectorListEnvelope",
+    "ConnectorOAuthStartRead",
+    "ConnectorRead",
+    "ConnectorSyncRequest",
+    "ConnectorSyncTriggered",
     "InternalCalendarBlockRead",
     "InternalCalendarCompleteRequest",
     "InternalCalendarConfirmRequest",
     "InternalCalendarDetailEnvelope",
+    "InternalCalendarFeedbackCreateRequest",
     "InternalCalendarListEnvelope",
     "InternalCalendarListFilters",
     "InternalCalendarMutationEnvelope",

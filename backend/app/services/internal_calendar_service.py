@@ -6,8 +6,14 @@ from datetime import datetime, timedelta, timezone
 import psycopg
 from fastapi import HTTPException, status
 
-from app.models.internal_calendar import CalendarBlockStatus, CalendarBlockType, FeedbackResponseType
-from app.models.task import TaskModel, TaskStatus
+from app.models.internal_calendar import (
+    CalendarBlockStatus,
+    CalendarBlockType,
+    CalendarFeedbackModel,
+    FeedbackResponseType,
+    InternalCalendarBlockModel,
+)
+from app.models.task import TaskModel
 from app.repositories.internal_calendar import InternalCalendarRepository
 from app.repositories.tasks import TaskRepository
 from app.schemas.internal_calendar import (
@@ -15,6 +21,7 @@ from app.schemas.internal_calendar import (
     InternalCalendarBlockRead,
     InternalCalendarCompleteRequest,
     InternalCalendarConfirmRequest,
+    InternalCalendarFeedbackCreateRequest,
     InternalCalendarListFilters,
     InternalCalendarRejectRequest,
     InternalCalendarRescheduleRequest,
@@ -133,7 +140,22 @@ class InternalCalendarService:
         block_id: str,
         payload: InternalCalendarConfirmRequest,
     ) -> InternalCalendarBlockRead:
-        self._require_block(block_id=block_id, user_id=user_id)
+        block = self._require_block(block_id=block_id, user_id=user_id)
+        if block.status == CalendarBlockStatus.CONFIRMED:
+            if payload.sync_to_google is not None and payload.sync_to_google != block.sync_to_google:
+                updated = self.repository.update_block(
+                    block_id=block_id,
+                    user_id=user_id,
+                    values={"sync_to_google": payload.sync_to_google},
+                )
+                assert updated is not None
+                return InternalCalendarBlockRead.from_model(updated)
+            return InternalCalendarBlockRead.from_model(block)
+        self._ensure_transition_allowed(
+            block=block,
+            allowed_statuses={CalendarBlockStatus.SUGGESTED, CalendarBlockStatus.RESCHEDULED},
+            action="confirm",
+        )
         values = {
             "status": CalendarBlockStatus.CONFIRMED,
             "confirmed_at": datetime.now(timezone.utc),
@@ -141,22 +163,18 @@ class InternalCalendarService:
         if payload.sync_to_google is not None:
             values["sync_to_google"] = payload.sync_to_google
 
-        block = self.repository.update_block(block_id=block_id, user_id=user_id, values=values)
-        assert block is not None
-        self.repository.insert_feedback(
+        updated = self.repository.update_block(block_id=block_id, user_id=user_id, values=values)
+        assert updated is not None
+        self._record_feedback_and_event(
             block_id=block_id,
             user_id=user_id,
             response_type=FeedbackResponseType.ACCEPTED,
             reason_text=payload.reason_text,
             fatigue_score=payload.fatigue_score,
+            event_type="suggestion_accepted",
+            payload={"status": updated.status.value, "sync_to_google": updated.sync_to_google},
         )
-        self.repository.log_calendar_event(
-            user_id=user_id,
-            event_type="calendar_block_confirmed",
-            block_id=block.id,
-            payload={"status": block.status.value, "sync_to_google": block.sync_to_google},
-        )
-        return InternalCalendarBlockRead.from_model(block)
+        return InternalCalendarBlockRead.from_model(updated)
 
     def reject_block(
         self,
@@ -165,8 +183,15 @@ class InternalCalendarService:
         block_id: str,
         payload: InternalCalendarRejectRequest,
     ) -> InternalCalendarBlockRead:
-        self._require_block(block_id=block_id, user_id=user_id)
-        block = self.repository.update_block(
+        block = self._require_block(block_id=block_id, user_id=user_id)
+        if block.status == CalendarBlockStatus.REJECTED:
+            return InternalCalendarBlockRead.from_model(block)
+        self._ensure_transition_allowed(
+            block=block,
+            allowed_statuses={CalendarBlockStatus.SUGGESTED, CalendarBlockStatus.RESCHEDULED, CalendarBlockStatus.CONFIRMED},
+            action="reject",
+        )
+        updated = self.repository.update_block(
             block_id=block_id,
             user_id=user_id,
             values={
@@ -174,22 +199,18 @@ class InternalCalendarService:
                 "rejected_at": datetime.now(timezone.utc),
             },
         )
-        assert block is not None
-        self.repository.insert_feedback(
+        assert updated is not None
+        self._record_feedback_and_event(
             block_id=block_id,
             user_id=user_id,
             response_type=FeedbackResponseType.REJECTED,
             reason_code=payload.reason_code,
             reason_text=payload.reason_text,
             fatigue_score=payload.fatigue_score,
+            event_type="suggestion_rejected",
+            payload={"reason_code": payload.reason_code, "status": updated.status.value},
         )
-        self.repository.log_calendar_event(
-            user_id=user_id,
-            event_type="calendar_block_rejected",
-            block_id=block.id,
-            payload={"reason_code": payload.reason_code},
-        )
-        return InternalCalendarBlockRead.from_model(block)
+        return InternalCalendarBlockRead.from_model(updated)
 
     def reschedule_block(
         self,
@@ -199,6 +220,11 @@ class InternalCalendarService:
         payload: InternalCalendarRescheduleRequest,
     ) -> InternalCalendarBlockRead:
         block = self._require_block(block_id=block_id, user_id=user_id)
+        self._ensure_transition_allowed(
+            block=block,
+            allowed_statuses={CalendarBlockStatus.SUGGESTED, CalendarBlockStatus.RESCHEDULED, CalendarBlockStatus.CONFIRMED},
+            action="reschedule",
+        )
 
         if payload.auto_find_new_slot:
             duration = block.ends_at - block.starts_at
@@ -246,18 +272,14 @@ class InternalCalendarService:
             },
         )
         assert updated is not None
-        self.repository.insert_feedback(
+        self._record_feedback_and_event(
             block_id=block_id,
             user_id=user_id,
             response_type=FeedbackResponseType.MOVED,
             reason_code=payload.reason_code,
             reason_text=payload.reason_text,
             fatigue_score=payload.fatigue_score,
-        )
-        self.repository.log_calendar_event(
-            user_id=user_id,
-            event_type="calendar_block_rescheduled",
-            block_id=updated.id,
+            event_type="suggestion_rescheduled",
             payload={
                 "starts_at": updated.starts_at.isoformat(),
                 "ends_at": updated.ends_at.isoformat(),
@@ -274,6 +296,17 @@ class InternalCalendarService:
         payload: InternalCalendarCompleteRequest,
     ) -> tuple[InternalCalendarBlockRead, TaskRead | None]:
         block = self._require_block(block_id=block_id, user_id=user_id)
+        if block.status == CalendarBlockStatus.DONE:
+            return InternalCalendarBlockRead.from_model(block), None
+        self._ensure_transition_allowed(
+            block=block,
+            allowed_statuses={
+                CalendarBlockStatus.SUGGESTED,
+                CalendarBlockStatus.RESCHEDULED,
+                CalendarBlockStatus.CONFIRMED,
+            },
+            action="complete",
+        )
         completed = self.repository.update_block(
             block_id=block_id,
             user_id=user_id,
@@ -287,16 +320,12 @@ class InternalCalendarService:
             },
         )
         assert completed is not None
-        self.repository.insert_feedback(
+        self._record_feedback_and_event(
             block_id=block_id,
             user_id=user_id,
             response_type=FeedbackResponseType.COMPLETED,
             reason_text=payload.notes,
-        )
-        self.repository.log_calendar_event(
-            user_id=user_id,
-            event_type="calendar_block_completed",
-            block_id=completed.id,
+            event_type="suggestion_completed",
             payload={"task_completed": payload.task_completed},
         )
 
@@ -312,11 +341,87 @@ class InternalCalendarService:
 
         return InternalCalendarBlockRead.from_model(completed), completed_task
 
+    def create_feedback(
+        self,
+        *,
+        user_id: str,
+        block_id: str,
+        payload: InternalCalendarFeedbackCreateRequest,
+    ) -> CalendarFeedbackRead:
+        self._require_block(block_id=block_id, user_id=user_id)
+        feedback = self._record_feedback_and_event(
+            block_id=block_id,
+            user_id=user_id,
+            response_type=payload.response_type,
+            reason_code=payload.reason_code,
+            reason_text=payload.reason_text,
+            fatigue_score=payload.fatigue_score,
+            event_type=self._feedback_event_type(payload.response_type),
+            payload={"response_type": payload.response_type.value},
+        )
+        return CalendarFeedbackRead.from_model(feedback)
+
     def _require_block(self, *, block_id: str, user_id: str):
         block = self.repository.get_block(block_id=block_id, user_id=user_id)
         if block is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Calendar block not found")
         return block
+
+    def _ensure_transition_allowed(
+        self,
+        *,
+        block: InternalCalendarBlockModel,
+        allowed_statuses: set[CalendarBlockStatus],
+        action: str,
+    ) -> None:
+        if block.status not in allowed_statuses:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Cannot {action} a calendar block in {block.status.value} status",
+            )
+
+    def _record_feedback_and_event(
+        self,
+        *,
+        block_id: str,
+        user_id: str,
+        response_type: FeedbackResponseType,
+        event_type: str,
+        payload: dict[str, object],
+        reason_code: str | None = None,
+        reason_text: str | None = None,
+        fatigue_score: int | None = None,
+    ) -> CalendarFeedbackModel:
+        feedback = self.repository.insert_feedback(
+            block_id=block_id,
+            user_id=user_id,
+            response_type=response_type,
+            reason_code=reason_code,
+            reason_text=reason_text,
+            fatigue_score=fatigue_score,
+        )
+        self.repository.log_calendar_event(
+            user_id=user_id,
+            event_type=event_type,
+            block_id=block_id,
+            payload={
+                **payload,
+                "response_type": response_type.value,
+                **({"reason_code": reason_code} if reason_code is not None else {}),
+                **({"fatigue_score": fatigue_score} if fatigue_score is not None else {}),
+            },
+        )
+        return feedback
+
+    def _feedback_event_type(self, response_type: FeedbackResponseType) -> str:
+        return {
+            FeedbackResponseType.ACCEPTED: "suggestion_accepted",
+            FeedbackResponseType.REJECTED: "suggestion_rejected",
+            FeedbackResponseType.MOVED: "suggestion_rescheduled",
+            FeedbackResponseType.COMPLETED: "suggestion_completed",
+            FeedbackResponseType.SNOOZED: "suggestion_snoozed",
+            FeedbackResponseType.IGNORED: "suggestion_ignored",
+        }[response_type]
 
     def _sort_tasks_for_scheduling(self, tasks: list[TaskModel]) -> list[TaskModel]:
         return sorted(

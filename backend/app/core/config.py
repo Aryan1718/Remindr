@@ -25,6 +25,14 @@ class Settings(BaseModel):
     supabase_jwt_issuer: str | None = None
     supabase_jwks_url: str | None = None
     supabase_jwt_audience: str | None = "authenticated"
+    frontend_base_url: str | None = "http://localhost:5173"
+    google_client_id: str | None = None
+    google_client_secret: str | None = None
+    google_oauth_redirect_uri: str | None = None
+    google_oauth_scopes: str = (
+        "openid https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/calendar.readonly"
+    )
+    connector_sync_eager: bool = True
     telegram_validate_bot_tokens: bool = False
     telegram_default_webhook_base_url: str | None = None
 
@@ -46,6 +54,19 @@ class Settings(BaseModel):
         if issuer:
             return f"{issuer}/.well-known/jwks.json"
         return None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def resolved_frontend_base_url(self) -> str | None:
+        if self.frontend_base_url:
+            return self.frontend_base_url.rstrip("/")
+        return None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def resolved_google_oauth_scopes(self) -> list[str]:
+        raw_scopes = self.google_oauth_scopes.replace(",", " ")
+        return [item.strip() for item in raw_scopes.split() if item.strip()]
 
 
 def _parse_cors_origins(value: object) -> list[str]:
