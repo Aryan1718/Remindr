@@ -37,6 +37,7 @@ from app.services.telegram.telegram_formatter import (
     format_next_action,
     format_plan_day,
     format_task_created,
+    format_task_created_with_next_action,
     format_task_list,
 )
 
@@ -437,6 +438,22 @@ class AgentService:
                     metadata_json={"captured_via": "agent", "intent_type": intent.intent_type},
                 ),
             )
+            if intent.wants_recommendation_now:
+                decision_service = self._require_service(self.decision_service, "decision")
+                fatigue_score = intent.fatigue_score if intent.fatigue_score is not None else context.get("fatigue_score")
+                response = decision_service.next_best_action(
+                    user_id=user_id,
+                    payload=DecisionNextBestActionRequest(
+                        query=self._build_follow_up_next_action_query(intent=intent, task_title=task.title),
+                        fatigue_score=fatigue_score,
+                        time_available_minutes=intent.time_available_minutes,
+                    ),
+                )
+                return TelegramAgentReply(
+                    text=format_task_created_with_next_action(task, response),
+                    intent="create_task_with_next_action",
+                    reply_markup=self.build_task_reply_markup(task_id=task.id),
+                )
             return TelegramAgentReply(
                 text=format_task_created(task),
                 intent="create_task",
@@ -502,6 +519,12 @@ class AgentService:
             intent="next_action",
             reply_markup=reply_markup,
         )
+
+    def _build_follow_up_next_action_query(self, *, intent: NormalizedIntent, task_title: str) -> str:
+        if intent.due_at is not None:
+            due_text = intent.due_at.strftime("%Y-%m-%d %H:%M UTC")
+            return f"I need to complete '{task_title}' by {due_text}. What is the best thing to do right now?"
+        return f"I need to complete '{task_title}'. What is the best thing to do right now?"
 
     def _extract_task_title(self, text: str) -> str:
         normalized = text.strip()

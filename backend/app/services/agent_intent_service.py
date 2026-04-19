@@ -31,6 +31,7 @@ INTENT_SCHEMA = StructuredOutputSchema(
             "due_at": {"type": ["string", "null"], "format": "date-time"},
             "time_available_minutes": {"type": ["integer", "null"], "minimum": 0, "maximum": 720},
             "fatigue_score": {"type": ["integer", "null"], "minimum": 0, "maximum": 5},
+            "wants_recommendation_now": {"type": "boolean"},
         },
         "required": ["intent_type"],
     },
@@ -73,9 +74,11 @@ class AgentIntentService:
                         content=(
                             "Examples:\n"
                             'Input: "I am free right now what should I do"\n'
-                            'Output: {"intent_type":"NEXT_ACTION","time_available_minutes":null}\n'
+                            'Output: {"intent_type":"NEXT_ACTION","time_available_minutes":null,"wants_recommendation_now":true}\n'
                             'Input: "Remind me to finish assignment tomorrow"\n'
-                            'Output: {"intent_type":"CREATE_TASK","task_title":"Finish assignment","due_at":"2026-04-20T09:00:00Z"}\n'
+                            'Output: {"intent_type":"CREATE_TASK","task_title":"Finish assignment","due_at":"2026-04-20T09:00:00Z","wants_recommendation_now":false}\n'
+                            'Input: "I have to finish the deck by Monday, what should I do right now?"\n'
+                            'Output: {"intent_type":"CREATE_TASK","task_title":"Finish the deck","due_at":"2026-04-20T17:00:00Z","wants_recommendation_now":true}\n'
                             f'Input: "{message}"'
                         ),
                     ),
@@ -88,24 +91,57 @@ class AgentIntentService:
             payload["raw_text"] = user_message
             payload.setdefault("entities", {})
             payload.setdefault("context", {})
+            payload.setdefault("wants_recommendation_now", False)
             return NormalizedIntent.model_validate(payload)
         except Exception:
             return self._fallback_normalize(message)
 
     def _fallback_normalize(self, message: str) -> NormalizedIntent:
         lowered = message.casefold()
-        if lowered.startswith(("task:", "todo:", "add task:", "capture task:", "remind me to ")):
-            title = message.split(":", 1)[1].strip() if ":" in message else message[13:].strip()
-            return NormalizedIntent(intent_type="CREATE_TASK", raw_text=message, task_title=title or None)
+        wants_recommendation_now = any(
+            phrase in lowered
+            for phrase in (
+                "what should i do",
+                "what now",
+                "what next",
+                "right now",
+                "anything i can do now",
+                "anything for me now",
+                "best thing to do",
+                "best thing i can do",
+            )
+        )
+        if lowered.startswith(("task:", "todo:", "add task:", "capture task:", "remind me to ")) or " by " in lowered:
+            title = self._fallback_extract_task_title(message)
+            return NormalizedIntent(
+                intent_type="CREATE_TASK",
+                raw_text=message,
+                task_title=title or None,
+                wants_recommendation_now=wants_recommendation_now,
+            )
         if "plan my day" in lowered or "plan today" in lowered or "plan tomorrow" in lowered:
             return NormalizedIntent(intent_type="PLAN_DAY", raw_text=message)
         if any(phrase in lowered for phrase in ("what should i do", "what next", "what now", "what should i work on")):
-            return NormalizedIntent(intent_type="NEXT_ACTION", raw_text=message)
+            return NormalizedIntent(intent_type="NEXT_ACTION", raw_text=message, wants_recommendation_now=True)
         if "calendar" in lowered or "schedule" in lowered:
             return NormalizedIntent(intent_type="CALENDAR_ACTION", raw_text=message)
         if any(phrase in lowered for phrase in ("list tasks", "show tasks", "my tasks", "what tasks")):
             return NormalizedIntent(intent_type="GET_TASKS", raw_text=message)
         return NormalizedIntent(intent_type="GENERAL_DECISION", raw_text=message)
+
+    def _fallback_extract_task_title(self, message: str) -> str | None:
+        normalized = message.strip()
+        lowered = normalized.casefold()
+        for prefix in ("task:", "todo:", "add task:", "capture task:"):
+            if lowered.startswith(prefix):
+                value = normalized[len(prefix):].strip()
+                return value or None
+        if lowered.startswith("remind me to "):
+            value = normalized[13:].strip()
+            return value or None
+        if " by " in lowered:
+            return normalized.split(" by ", 1)[0].strip(" .?!,") or None
+        return normalized or None
 
 
 async def normalize_intent(

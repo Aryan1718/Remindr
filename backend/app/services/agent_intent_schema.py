@@ -23,3 +23,4 @@ class NormalizedIntent(BaseModel):
     due_at: datetime | None = None
     time_available_minutes: int | None = None
     fatigue_score: int | None = None
+    wants_recommendation_now: bool = False

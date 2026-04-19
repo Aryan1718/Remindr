@@ -118,7 +118,7 @@ class FakeTaskService:
             estimated_minutes=None,
             actual_minutes=None,
             energy_required=None,
-            due_at=None,
+            due_at=payload.due_at,
             status="pending",
             source=payload.source,
             metadata_json=payload.metadata_json,
@@ -289,6 +289,34 @@ class AgentServiceTests(unittest.TestCase):
         self.assertEqual(reply.intent, "create_task")
         self.assertEqual(self.task_service.create_calls[0][1].title, "Finish resume bullets")
         self.assertIn("Task saved:", reply.text)
+
+    def test_deadline_task_can_create_and_recommend_next_action(self) -> None:
+        due_at = datetime(2026, 4, 20, 17, 0, tzinfo=UTC)
+        self.llm_client.structured = {
+            "I have to finish the deck by Monday. Do you have anything for me now that I can do?": {
+                "intent_type": "CREATE_TASK",
+                "task_title": "Finish the deck",
+                "due_at": due_at.isoformat(),
+                "wants_recommendation_now": True,
+            }
+        }
+
+        reply = self.service.handle_telegram_inbound(
+            user_id="user-1",
+            inbound=NormalizedTelegramInbound(
+                update_type="message",
+                text="I have to finish the deck by Monday. Do you have anything for me now that I can do?",
+            ),
+        )
+
+        assert reply is not None
+        self.assertEqual(reply.intent, "create_task_with_next_action")
+        self.assertEqual(self.task_service.create_calls[0][1].title, "Finish the deck")
+        self.assertEqual(self.task_service.create_calls[0][1].due_at, due_at)
+        self.assertEqual(self.decision_service.next_action_calls[0][0], "user-1")
+        self.assertIn("Task saved:", reply.text)
+        self.assertIn("Best task right now:", reply.text)
+        self.assertIn("Finish the deck", self.decision_service.next_action_calls[0][1].query)
 
     def test_fatigue_input_routes_to_fatigue_service(self) -> None:
         reply = self.service.handle_telegram_inbound(
