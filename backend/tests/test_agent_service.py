@@ -3,10 +3,12 @@ from __future__ import annotations
 import unittest
 from datetime import UTC, date, datetime
 
-from app.llm.schemas import LLMTextResult
+from app.llm.schemas import LLMStructuredResult, LLMTextResult
+from app.models.fatigue import FatigueEstimateModel, FatigueModeRecommendation, FatigueTimeBucket
 from app.models.internal_calendar import CalendarBlockStatus, CalendarBlockType
 from app.schemas.decision import (
     DayPlanResponse,
+    DecisionNextBestActionRequest,
     DecisionResponse,
     DecisionSuggestedActionRead,
     DecisionSuggestionRead,
@@ -18,8 +20,9 @@ from app.services.agent_service import AgentService, NormalizedTelegramInbound
 
 
 class FakeLLMClient:
-    def __init__(self, text: str = "This is an LLM reply.") -> None:
+    def __init__(self, *, text: str = "This is an LLM reply.", structured: dict[str, dict] | None = None) -> None:
         self.text = text
+        self.structured = structured or {}
         self.calls: list[dict] = []
 
     def generate_text(self, *, messages, model=None, temperature=0.2, max_tokens=None) -> LLMTextResult:
@@ -33,11 +36,28 @@ class FakeLLMClient:
         )
         return LLMTextResult(text=self.text)
 
+    def generate_structured(self, *, messages, schema, model=None, temperature=0.0, max_tokens=None) -> LLMStructuredResult:
+        self.calls.append(
+            {
+                "messages": messages,
+                "schema": schema,
+                "model": model,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+            }
+        )
+        prompt = messages[-1].content
+        marker = 'Input: "'
+        raw_text = prompt.split(marker)[-1].rstrip('"') if marker in prompt else prompt
+        parsed = dict(self.structured.get(raw_text, {"intent_type": "GENERAL_DECISION"}))
+        return LLMStructuredResult(parsed=parsed, text=str(parsed))
+
 
 class FakeDecisionService:
     def __init__(self) -> None:
         self.query_calls: list[tuple[str, object]] = []
         self.plan_calls: list[tuple[str, object]] = []
+        self.next_action_calls: list[tuple[str, object]] = []
 
     def query(self, *, user_id: str, payload) -> DecisionResponse:
         self.query_calls.append((user_id, payload))
@@ -57,6 +77,10 @@ class FakeDecisionService:
             follow_up_questions=[],
             suggested_actions=[DecisionSuggestedActionRead(action_type="task_done", label="Done", payload={"task_id": "task-1"})],
         )
+
+    def next_best_action(self, *, user_id: str, payload: DecisionNextBestActionRequest) -> DecisionResponse:
+        self.next_action_calls.append((user_id, payload))
+        return self.query(user_id=user_id, payload=payload)
 
     def plan_day(self, *, user_id: str, payload) -> DayPlanResponse:
         self.plan_calls.append((user_id, payload))
@@ -82,6 +106,7 @@ class FakeTaskService:
     def __init__(self) -> None:
         self.create_calls: list[tuple[str, object]] = []
         self.complete_calls: list[tuple[str, str, object]] = []
+        self.list_calls: list[tuple[str, object]] = []
 
     def create_task(self, *, user_id: str, payload) -> TaskRead:
         self.create_calls.append((user_id, payload))
@@ -121,6 +146,27 @@ class FakeTaskService:
             completed_at=payload.completed_at,
         )
 
+    def list_tasks(self, *, user_id: str, filters) -> list[TaskRead]:
+        self.list_calls.append((user_id, filters))
+        return [
+            TaskRead(
+                id="task-1",
+                title="Finish resume bullets",
+                description=None,
+                priority=3,
+                estimated_minutes=45,
+                actual_minutes=None,
+                energy_required=2,
+                due_at=datetime(2026, 4, 20, 18, 0, tzinfo=UTC),
+                status="pending",
+                source="telegram",
+                metadata_json={},
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+                completed_at=None,
+            )
+        ]
+
 
 class FakeFatigueService:
     def __init__(self) -> None:
@@ -138,12 +184,23 @@ class FakeFatigueService:
             created_at=datetime.now(UTC),
         )
 
+    def estimate_current_fatigue(self, *, user_id: str, timezone_name: str | None = None, at: datetime | None = None) -> FatigueEstimateModel:
+        _ = (user_id, timezone_name, at)
+        return FatigueEstimateModel(
+            estimated_fatigue_score=2.0,
+            time_bucket=FatigueTimeBucket.AFTERNOON,
+            pattern_confidence=0.5,
+            estimation_confidence=0.8,
+            mode_recommendation=FatigueModeRecommendation.GUIDED,
+        )
+
 
 class FakeCalendarService:
     def __init__(self) -> None:
         self.confirm_calls: list[tuple[str, str, object]] = []
         self.reject_calls: list[tuple[str, str, object]] = []
         self.reschedule_calls: list[tuple[str, str, object]] = []
+        self.list_calls: list[tuple[str, object]] = []
 
     def confirm_block(self, *, user_id: str, block_id: str, payload) -> InternalCalendarBlockRead:
         self.confirm_calls.append((user_id, block_id, payload))
@@ -156,6 +213,10 @@ class FakeCalendarService:
     def reschedule_block(self, *, user_id: str, block_id: str, payload) -> InternalCalendarBlockRead:
         self.reschedule_calls.append((user_id, block_id, payload))
         return self._block(block_id, status=CalendarBlockStatus.RESCHEDULED)
+
+    def list_blocks(self, *, user_id: str, filters) -> list[InternalCalendarBlockRead]:
+        self.list_calls.append((user_id, filters))
+        return [self._block("block-1")]
 
     def _block(self, block_id: str, status: CalendarBlockStatus = CalendarBlockStatus.CONFIRMED) -> InternalCalendarBlockRead:
         now = datetime(2026, 4, 19, 18, 0, tzinfo=UTC)
@@ -189,36 +250,45 @@ class AgentServiceTests(unittest.TestCase):
         self.task_service = FakeTaskService()
         self.fatigue_service = FakeFatigueService()
         self.calendar_service = FakeCalendarService()
+        self.llm_client = FakeLLMClient()
         self.service = AgentService(
             connection=None,
             decision_service=self.decision_service,
             task_service=self.task_service,
             fatigue_service=self.fatigue_service,
             internal_calendar_service=self.calendar_service,
+            llm_client=self.llm_client,
         )
 
-    def test_decision_query_routes_to_decision_service_and_formats_reply(self) -> None:
+    def test_next_action_routes_to_decision_service_and_formats_reply(self) -> None:
+        self.llm_client.structured = {"What should I do first tonight?": {"intent_type": "NEXT_ACTION"}}
         reply = self.service.handle_telegram_inbound(
             user_id="user-1",
             inbound=NormalizedTelegramInbound(update_type="message", text="What should I do first tonight?"),
         )
 
         assert reply is not None
-        self.assertEqual(reply.intent, "decision_query")
-        self.assertIn("First: Finish resume bullets.", reply.text)
+        self.assertEqual(reply.intent, "next_action")
+        self.assertIn("Best task right now:", reply.text)
         self.assertEqual(reply.reply_markup["inline_keyboard"][0][0]["callback_data"], "task:done:task-1")
-        self.assertEqual(self.decision_service.query_calls[0][0], "user-1")
+        self.assertEqual(self.decision_service.next_action_calls[0][0], "user-1")
 
-    def test_task_capture_routes_to_task_service(self) -> None:
+    def test_create_task_routes_to_task_service(self) -> None:
+        self.llm_client.structured = {
+            "Remind me to finish resume bullets tomorrow": {
+                "intent_type": "CREATE_TASK",
+                "task_title": "Finish resume bullets",
+            }
+        }
         reply = self.service.handle_telegram_inbound(
             user_id="user-1",
-            inbound=NormalizedTelegramInbound(update_type="message", text="Task: finish resume bullets"),
+            inbound=NormalizedTelegramInbound(update_type="message", text="Remind me to finish resume bullets tomorrow"),
         )
 
         assert reply is not None
-        self.assertEqual(reply.intent, "task_capture")
-        self.assertEqual(self.task_service.create_calls[0][1].title, "finish resume bullets")
-        self.assertIn("Captured task", reply.text)
+        self.assertEqual(reply.intent, "create_task")
+        self.assertEqual(self.task_service.create_calls[0][1].title, "Finish resume bullets")
+        self.assertIn("Task saved:", reply.text)
 
     def test_fatigue_input_routes_to_fatigue_service(self) -> None:
         reply = self.service.handle_telegram_inbound(
@@ -261,48 +331,53 @@ class AgentServiceTests(unittest.TestCase):
         self.assertEqual(self.calendar_service.reschedule_calls[0][1], "block-1")
         self.assertIn("Moved: Focus - Finish resume bullets.", reply.text)
 
-    def test_general_question_routes_to_llm_reply(self) -> None:
-        llm_client = FakeLLMClient(text="Paris is the capital of France.")
-        service = AgentService(
-            connection=None,
-            decision_service=self.decision_service,
-            task_service=self.task_service,
-            fatigue_service=self.fatigue_service,
-            internal_calendar_service=self.calendar_service,
-            llm_client=llm_client,
-        )
-
-        reply = service.handle_telegram_inbound(
+    def test_get_tasks_routes_to_task_service(self) -> None:
+        self.llm_client.structured = {"Show my tasks": {"intent_type": "GET_TASKS"}}
+        reply = self.service.handle_telegram_inbound(
             user_id="user-1",
-            inbound=NormalizedTelegramInbound(update_type="message", text="What is the capital of France?"),
+            inbound=NormalizedTelegramInbound(update_type="message", text="Show my tasks"),
         )
 
         assert reply is not None
-        self.assertEqual(reply.intent, "general_chat")
-        self.assertEqual(reply.text, "Paris is the capital of France.")
-        self.assertEqual(len(self.decision_service.query_calls), 0)
-        self.assertEqual(llm_client.calls[0]["messages"][1].content, "What is the capital of France?")
+        self.assertEqual(reply.intent, "get_tasks")
+        self.assertIn("Open tasks:", reply.text)
+        self.assertEqual(self.task_service.list_calls[1][0], "user-1")
 
-    def test_non_command_statement_routes_to_llm_reply(self) -> None:
-        llm_client = FakeLLMClient(text="I can help with that.")
-        service = AgentService(
-            connection=None,
-            decision_service=self.decision_service,
-            task_service=self.task_service,
-            fatigue_service=self.fatigue_service,
-            internal_calendar_service=self.calendar_service,
-            llm_client=llm_client,
-        )
-
-        reply = service.handle_telegram_inbound(
+    def test_plan_day_routes_to_decision_service(self) -> None:
+        self.llm_client.structured = {"Plan my day": {"intent_type": "PLAN_DAY"}}
+        reply = self.service.handle_telegram_inbound(
             user_id="user-1",
-            inbound=NormalizedTelegramInbound(update_type="message", text="Tell me a quick joke"),
+            inbound=NormalizedTelegramInbound(update_type="message", text="Plan my day"),
         )
 
         assert reply is not None
-        self.assertEqual(reply.intent, "general_chat")
-        self.assertEqual(reply.text, "I can help with that.")
-        self.assertEqual(len(self.decision_service.query_calls), 0)
+        self.assertEqual(reply.intent, "plan_day")
+        self.assertEqual(self.decision_service.plan_calls[0][0], "user-1")
+        self.assertIn("Plan for today:", reply.text)
+
+    def test_calendar_action_routes_to_calendar_service(self) -> None:
+        self.llm_client.structured = {"Show my calendar": {"intent_type": "CALENDAR_ACTION"}}
+        reply = self.service.handle_telegram_inbound(
+            user_id="user-1",
+            inbound=NormalizedTelegramInbound(update_type="message", text="Show my calendar"),
+        )
+
+        assert reply is not None
+        self.assertEqual(reply.intent, "calendar_action")
+        self.assertEqual(self.calendar_service.list_calls[1][0], "user-1")
+        self.assertIn("Next calendar blocks:", reply.text)
+
+    def test_unknown_intent_falls_back_to_general_decision(self) -> None:
+        self.llm_client.structured = {"Tell me something useful": {"intent_type": "UNKNOWN"}}
+        reply = self.service.handle_telegram_inbound(
+            user_id="user-1",
+            inbound=NormalizedTelegramInbound(update_type="message", text="Tell me something useful"),
+        )
+
+        assert reply is not None
+        self.assertEqual(reply.intent, "general_decision")
+        self.assertEqual(self.decision_service.query_calls[0][0], "user-1")
+        self.assertIn("Finish resume bullets", reply.text)
 
 
 if __name__ == "__main__":
