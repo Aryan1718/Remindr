@@ -29,6 +29,8 @@ pnpm-debug.log*
 # Python caches
 __pycache__/
 *.py[cod]
+.venv/
+backend/.venv/
 
 # OS files
 .DS_Store
