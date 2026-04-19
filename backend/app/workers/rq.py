@@ -102,7 +102,7 @@ def enqueue_memory_distillation(
     from app.workers.jobs.memory_distillation import distill_memories_job
 
     settings = get_settings()
-    mode = "inline" if getattr(settings, "memory_distillation_eager", True) else "async"
+    mode = "inline" if settings.memory_distillation_eager else "async"
     job = enqueue_callable(
         queue_name=MEMORY_DISTILLATION_QUEUE,
         fn=distill_memories_job,
