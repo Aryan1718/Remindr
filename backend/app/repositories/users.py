@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 
 import psycopg
+from psycopg import sql
 
 from app.models.user import UserModel, UserPreferencesModel
 
@@ -176,6 +177,47 @@ class UserRepository:
                 """,
                 (user_id, json.dumps({})),
             )
+            record = cursor.fetchone()
+        self.connection.commit()
+        return UserPreferencesModel.from_record(record)
+
+    def update_preferences(
+        self,
+        user_id: str,
+        *,
+        values: dict[str, object],
+    ) -> UserPreferencesModel:
+        assignments: list[sql.Composed] = []
+        params: list[object] = []
+
+        for column, value in values.items():
+            if column == "profile_json":
+                assignments.append(
+                    sql.SQL("profile_json = coalesce(profile_json, '{}'::jsonb) || %s::jsonb")
+                )
+                params.append(json.dumps(value))
+                continue
+
+            assignments.append(sql.SQL("{} = %s").format(sql.Identifier(column)))
+            params.append(value)
+
+        assignments.append(sql.SQL("updated_at = now()"))
+        params.append(user_id)
+
+        query = sql.SQL(
+            """
+            update user_preferences
+            set {assignments}
+            where user_id = %s
+            returning {columns}
+            """
+        ).format(
+            assignments=sql.SQL(", ").join(assignments),
+            columns=sql.SQL(PREFERENCE_COLUMNS),
+        )
+
+        with self.connection.cursor() as cursor:
+            cursor.execute(query, params)
             record = cursor.fetchone()
         self.connection.commit()
         return UserPreferencesModel.from_record(record)

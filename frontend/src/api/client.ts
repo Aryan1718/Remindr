@@ -1,6 +1,8 @@
 import { frontendEnv } from "@/lib/env";
 import { sleep } from "@/lib/utils";
 
+const APP_SESSION_STORAGE_KEY = "remindr.auth.session";
+
 export async function simulateRequest<T>(resolver: () => T): Promise<T> {
   await sleep(200);
   return resolver();
@@ -15,38 +17,31 @@ function findAuthTokenInStorage(): string | null {
     return null;
   }
 
-  const directKeys = ["access_token", "supabase.access_token", "remindr.auth.session"];
+  const appSessionRaw =
+    window.localStorage.getItem(APP_SESSION_STORAGE_KEY) ??
+    window.sessionStorage.getItem(APP_SESSION_STORAGE_KEY);
+  if (appSessionRaw) {
+    try {
+      const parsed = JSON.parse(appSessionRaw) as unknown;
+      if (typeof parsed === "object" && parsed !== null) {
+        const record = parsed as Record<string, unknown>;
+        if (typeof record.accessToken === "string" && record.accessToken.trim()) {
+          return record.accessToken.trim();
+        }
+      }
+    } catch {
+      // Fall through to legacy token lookup paths.
+    }
+  }
+
+  const directKeys = ["access_token", "supabase.access_token"];
   for (const key of directKeys) {
     const value = window.localStorage.getItem(key);
     if (!value?.trim()) {
       continue;
     }
 
-    if (key === "remindr.auth.session") {
-      try {
-        const parsed = JSON.parse(value) as { accessToken?: string };
-        if (typeof parsed.accessToken === "string" && parsed.accessToken.trim()) {
-          return parsed.accessToken.trim();
-        }
-      } catch {
-        continue;
-      }
-      continue;
-    }
-
     return value.trim();
-  }
-
-  const sessionValue = window.sessionStorage.getItem("remindr.auth.session");
-  if (sessionValue?.trim()) {
-    try {
-      const parsed = JSON.parse(sessionValue) as { accessToken?: string };
-      if (typeof parsed.accessToken === "string" && parsed.accessToken.trim()) {
-        return parsed.accessToken.trim();
-      }
-    } catch {
-      return null;
-    }
   }
 
   for (let index = 0; index < window.localStorage.length; index += 1) {
