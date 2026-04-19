@@ -113,15 +113,7 @@ export function AuthShell({
   maxWidthClassName = "max-w-[31rem] sm:max-w-[33rem] lg:max-w-[35rem] xl:max-w-[36rem]",
 }: AuthShellProps) {
   return (
-    <div
-      className="relative min-h-screen overflow-hidden bg-black text-white"
-      style={{
-        fontFamily:
-          '-apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif',
-        MozOsxFontSmoothing: "grayscale",
-        WebkitFontSmoothing: "antialiased",
-      }}
-    >
+    <div className="relative min-h-screen overflow-hidden bg-black text-white">
       <div className="absolute inset-0">
         <div
           className="absolute inset-0"
@@ -187,18 +179,7 @@ export function AuthShell({
 export function AuthHeader({ description, subtitle }: AuthHeaderProps) {
   return (
     <div className="relative mb-8 text-center sm:mb-10">
-      <div
-        className="mx-auto mb-5 flex h-[4.1rem] w-[4.1rem] items-center justify-center rounded-full sm:h-[4.5rem] sm:w-[4.5rem]"
-        style={{
-          background:
-            "linear-gradient(135deg, rgba(100, 200, 255, 0.3) 0%, rgba(50, 150, 220, 0.4) 100%)",
-          border: "2px solid rgba(120, 210, 255, 0.4)",
-          boxShadow: "0 4px 20px rgba(100, 200, 255, 0.3)",
-        }}
-      >
-        <span className="text-[2rem] font-bold text-cyan-200 sm:text-[2.3rem]">R</span>
-      </div>
-      <h1 className="text-[2.3rem] font-bold leading-none tracking-[-0.02em] text-white sm:text-[2.75rem]">
+      <h1 className="remindr-wordmark text-[2.3rem] leading-none text-white sm:text-[2.75rem]">
         Remindr
       </h1>
       <h2 className="mt-3 text-[1.2rem] leading-tight text-gray-200 sm:text-[1.4rem]">{subtitle}</h2>
