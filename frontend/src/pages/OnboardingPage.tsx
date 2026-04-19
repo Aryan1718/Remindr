@@ -144,7 +144,7 @@ function createTask(): OnboardingTask {
 function createDefaultFormState(): OnboardingFormState {
   return {
     fullName: "",
-    timezone: "UTC-8 (Pacific Time)",
+    timezone: "America/Los_Angeles",
     role: "professional",
     bio: "",
     wakeTime: "07:00",
@@ -401,12 +401,12 @@ export function OnboardingPage() {
             onChange={(event) => updateFormState("timezone", event.target.value)}
             value={formState.timezone}
           >
-            <option value="UTC-8 (Pacific Time)">UTC-8 (Pacific Time)</option>
-            <option value="UTC-5 (Eastern Time)">UTC-5 (Eastern Time)</option>
-            <option value="UTC-6 (Central Time)">UTC-6 (Central Time)</option>
-            <option value="UTC+0 (GMT)">UTC+0 (GMT)</option>
-            <option value="UTC+1 (CET)">UTC+1 (CET)</option>
-            <option value="UTC+8 (Singapore)">UTC+8 (Singapore)</option>
+            <option value="America/Los_Angeles">Pacific Time</option>
+            <option value="America/New_York">Eastern Time</option>
+            <option value="America/Chicago">Central Time</option>
+            <option value="Etc/UTC">UTC</option>
+            <option value="Europe/Paris">Central European Time</option>
+            <option value="Asia/Singapore">Singapore Time</option>
           </select>
         </div>
 

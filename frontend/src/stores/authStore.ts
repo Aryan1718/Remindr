@@ -34,6 +34,7 @@ interface AuthStore {
   completeOAuthLogin: (payload: OAuthCallbackPayload) => Promise<UserSnapshot>;
   logout: () => void;
   clearError: () => void;
+  setSnapshot: (snapshot: UserSnapshot) => void;
 }
 
 function preferredName(snapshot: UserSnapshot): string | undefined {
@@ -176,6 +177,12 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     if (get().error) {
       set({ error: null });
     }
+  },
+  setSnapshot(snapshot) {
+    set((state) => ({
+      ...state,
+      snapshot,
+    }));
   },
 }));
 

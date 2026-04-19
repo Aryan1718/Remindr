@@ -1,9 +1,27 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.models.user import UserModel, UserPreferencesModel
+
+
+def _strip_or_none(value: str | None) -> str | None:
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def _time_to_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    isoformat = getattr(value, "isoformat", None)
+    if callable(isoformat):
+        return isoformat()
+    return str(value)
 
 
 class UserResponse(BaseModel):
@@ -46,10 +64,10 @@ class PreferencesResponse(BaseModel):
     def from_model(cls, preferences: UserPreferencesModel) -> "PreferencesResponse":
         return cls(
             user_id=preferences.user_id,
-            sleep_time=preferences.sleep_time,
-            wake_time=preferences.wake_time,
-            work_start_time=preferences.work_start_time,
-            work_end_time=preferences.work_end_time,
+            sleep_time=_time_to_string(preferences.sleep_time),
+            wake_time=_time_to_string(preferences.wake_time),
+            work_start_time=_time_to_string(preferences.work_start_time),
+            work_end_time=_time_to_string(preferences.work_end_time),
             work_days=preferences.work_days,
             preferred_response_style=preferences.preferred_response_style,
             decision_style_default=preferences.decision_style_default,
@@ -63,3 +81,39 @@ class PreferencesResponse(BaseModel):
 class UserSnapshotResponse(BaseModel):
     user: UserResponse
     preferences: PreferencesResponse
+
+
+class UserOnboardingUpdateRequest(BaseModel):
+    full_name: str | None = Field(default=None, max_length=255)
+    timezone: str | None = Field(default=None, max_length=100)
+    wake_time: str | None = None
+    sleep_time: str | None = None
+    work_start_time: str | None = None
+    work_end_time: str | None = None
+    preferred_response_style: str | None = Field(default=None, max_length=100)
+    decision_style_default: str | None = Field(default=None, max_length=100)
+    reminder_tolerance: str | None = Field(default=None, max_length=100)
+    fatigue_prompt_enabled: bool | None = None
+    onboarding_completed: bool | None = None
+    profile_json: dict[str, Any] | None = None
+
+    @field_validator(
+        "full_name",
+        "timezone",
+        "wake_time",
+        "sleep_time",
+        "work_start_time",
+        "work_end_time",
+        "preferred_response_style",
+        "decision_style_default",
+        "reminder_tolerance",
+    )
+    @classmethod
+    def normalize_strings(cls, value: str | None) -> str | None:
+        return _strip_or_none(value)
+
+    @model_validator(mode="after")
+    def ensure_payload(self) -> "UserOnboardingUpdateRequest":
+        if not self.model_fields_set:
+            raise ValueError("At least one field must be provided")
+        return self
