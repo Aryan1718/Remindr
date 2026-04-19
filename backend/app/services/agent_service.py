@@ -1,35 +1,52 @@
 from __future__ import annotations
 
+import json
+import logging
 import re
+import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import psycopg
 from fastapi import HTTPException
+from psycopg.errors import UndefinedTable
 
 from app.core.config import Settings, get_settings
 from app.llm import get_llm_client
 from app.llm.base import BaseLLMClient
 from app.llm.schemas import ChatMessage
-from app.schemas.decision import DecisionPlanDayRequest, DecisionQueryRequest
+from app.schemas.decision import DecisionNextBestActionRequest, DecisionPlanDayRequest, DecisionQueryRequest
 from app.schemas.fatigue import FatigueCheckinCreateRequest
 from app.schemas.internal_calendar import (
     InternalCalendarConfirmRequest,
+    InternalCalendarListFilters,
     InternalCalendarRejectRequest,
     InternalCalendarRescheduleRequest,
 )
-from app.schemas.task import CompleteTaskRequest, TaskCreateRequest
+from app.schemas.task import CompleteTaskRequest, TaskCreateRequest, TaskFilters
+from app.services.agent_intent_schema import NormalizedIntent
+from app.services.agent_intent_service import AgentIntentService
 from app.services.decision_service import DecisionService
 from app.services.fatigue_service import FatigueService
 from app.services.internal_calendar_service import InternalCalendarService
 from app.services.task_service import TaskService
+from app.services.telegram.telegram_formatter import (
+    format_calendar_blocks,
+    format_general_decision,
+    format_next_action,
+    format_plan_day,
+    format_task_created,
+    format_task_list,
+)
 
 FATIGUE_PATTERNS = (
     re.compile(r"\bfatigue\b\s*[:=]?\s*([0-5])\b", re.IGNORECASE),
     re.compile(r"\benergy\b\s*[:=]?\s*([0-5])\b", re.IGNORECASE),
     re.compile(r"\bi(?: am|'m)\s+(?:at\s+)?([0-5])\s*/?\s*5\b", re.IGNORECASE),
 )
+
+logger = logging.getLogger("app.services.agent")
 
 
 @dataclass(slots=True)
@@ -76,6 +93,7 @@ class AgentService:
         self.fatigue_service = fatigue_service or self._maybe_build(FatigueService, connection)
         self.internal_calendar_service = internal_calendar_service or self._maybe_build(InternalCalendarService, connection)
         self.llm_client = llm_client if llm_client is not None else get_llm_client(self.settings)
+        self.intent_service = AgentIntentService(settings=self.settings, llm_client=self.llm_client)
 
     def handle_telegram_inbound(self, *, user_id: str, inbound: NormalizedTelegramInbound) -> TelegramAgentReply | None:
         if inbound.update_type == "callback_query" and inbound.callback_data:
@@ -85,50 +103,15 @@ class AgentService:
         if not message_text:
             return None
 
-        intent = self.classify_intent(message_text)
-        if intent == "task_capture":
-            return self._handle_task_capture(user_id=user_id, text=message_text)
-        if intent == "fatigue_input":
-            return self._handle_fatigue_input(user_id=user_id, text=message_text)
-        if intent == "plan_request":
-            return self._handle_plan_request(user_id=user_id)
-        if intent == "decision_query":
-            return self._handle_decision_query(user_id=user_id, text=message_text)
-        if intent == "general_chat":
-            return self._handle_general_chat(text=message_text)
-        if intent == "help_status":
+        if message_text.lower() in {"/help", "help", "/status", "status"}:
             return self._handle_help_status()
-        return self._handle_help_status()
+        if self._extract_fatigue_score(message_text) is not None:
+            return self._handle_fatigue_input(user_id=user_id, text=message_text)
+        return self._handle_user_message_sync(user_id=user_id, message=message_text)
 
-    def classify_intent(self, text: str) -> str:
-        normalized = text.strip().lower()
-        if normalized in {"/help", "help", "/status", "status"}:
-            return "help_status"
-        if normalized.startswith(("task:", "todo:", "add task:", "capture task:")):
-            return "task_capture"
-        if normalized.startswith("remind me to "):
-            return "task_capture"
-        if self._extract_fatigue_score(text) is not None:
-            return "fatigue_input"
-        if any(phrase in normalized for phrase in ("plan my day", "plan today", "plan tomorrow", "today plan", "tomorrow plan")):
-            return "plan_request"
-        if any(
-            phrase in normalized
-            for phrase in (
-                "what should i do",
-                "what should i work on",
-                "what should i do first",
-                "what do i do first",
-                "what next",
-                "what now",
-                "should i",
-                "which task",
-            )
-        ):
-            return "decision_query"
-        if normalized.endswith("?"):
-            return "general_chat"
-        return "general_chat"
+    async def handle_user_message(self, user_id: str, message: str) -> TelegramAgentReply:
+        intent = await self.intent_service.normalize_intent(message)
+        return self._handle_normalized_message(user_id=user_id, message=message, intent=intent)
 
     def parse_callback_data(self, data: str) -> TelegramCallbackAction:
         parts = [part.strip() for part in data.split(":")]
@@ -365,6 +348,161 @@ class AgentService:
             intent="general_chat",
         )
 
+    def _handle_user_message_sync(self, *, user_id: str, message: str) -> TelegramAgentReply:
+        intent = self._normalize_intent_sync(message)
+        return self._handle_normalized_message(user_id=user_id, message=message, intent=intent)
+
+    def _handle_normalized_message(
+        self,
+        *,
+        user_id: str,
+        message: str,
+        intent: NormalizedIntent,
+    ) -> TelegramAgentReply:
+        context = self._build_agent_context(user_id=user_id, intent=intent)
+        self._log_interaction_event(
+            user_id=user_id,
+            event_type="agent_user_message",
+            payload={"message": message},
+        )
+        self._log_interaction_event(
+            user_id=user_id,
+            event_type="agent_parsed_intent",
+            payload=intent.model_dump(mode="json"),
+        )
+        reply = self._route_normalized_intent(user_id=user_id, intent=intent, context=context)
+        self._log_interaction_event(
+            user_id=user_id,
+            event_type="agent_response_sent",
+            payload={"intent_type": intent.intent_type, "text": reply.text},
+        )
+        return reply
+
+    def _normalize_intent_sync(self, text: str) -> NormalizedIntent:
+        return asyncio.run(self.intent_service.normalize_intent(text))
+
+    def _build_agent_context(self, *, user_id: str, intent: NormalizedIntent) -> dict[str, Any]:
+        now = datetime.now(UTC)
+        tasks: list[Any] = []
+        if self.task_service is not None:
+            tasks = self.task_service.list_tasks(user_id=user_id, filters=TaskFilters(limit=5))
+
+        calendar: list[Any] = []
+        if self.internal_calendar_service is not None:
+            calendar = self.internal_calendar_service.list_blocks(
+                user_id=user_id,
+                filters=InternalCalendarListFilters(start=now, limit=5),
+            )
+
+        fatigue_score = intent.fatigue_score
+        if fatigue_score is None and self.fatigue_service is not None:
+            estimate = self.fatigue_service.estimate_current_fatigue(user_id=user_id, at=now)
+            if estimate.explicit_checkin is not None:
+                fatigue_score = estimate.explicit_checkin.score
+            else:
+                fatigue_score = max(0, min(5, int(round(estimate.estimated_fatigue_score))))
+
+        hour = now.hour
+        if hour < 12:
+            time_of_day = "morning"
+        elif hour < 17:
+            time_of_day = "afternoon"
+        else:
+            time_of_day = "evening"
+
+        return {
+            "current_time": now.isoformat(),
+            "time_of_day": time_of_day,
+            "tasks": [task.model_dump(mode="json") for task in tasks[:5]],
+            "calendar": [block.model_dump(mode="json") for block in calendar[:5]],
+            "fatigue_score": fatigue_score,
+        }
+
+    def _route_normalized_intent(
+        self,
+        *,
+        user_id: str,
+        intent: NormalizedIntent,
+        context: dict[str, Any],
+    ) -> TelegramAgentReply:
+        if intent.intent_type == "CREATE_TASK":
+            service = self._require_service(self.task_service, "task")
+            title = intent.task_title or self._extract_task_title(intent.raw_text)
+            task = service.create_task(
+                user_id=user_id,
+                payload=TaskCreateRequest(
+                    title=title,
+                    due_at=intent.due_at,
+                    source="agent",
+                    metadata_json={"captured_via": "agent", "intent_type": intent.intent_type},
+                ),
+            )
+            return TelegramAgentReply(
+                text=format_task_created(task),
+                intent="create_task",
+                reply_markup=self.build_task_reply_markup(task_id=task.id),
+            )
+
+        if intent.intent_type == "GET_TASKS":
+            service = self._require_service(self.task_service, "task")
+            tasks = service.list_tasks(user_id=user_id, filters=TaskFilters(limit=5))
+            return TelegramAgentReply(text=format_task_list(tasks), intent="get_tasks")
+
+        if intent.intent_type == "NEXT_ACTION":
+            service = self._require_service(self.decision_service, "decision")
+            fatigue_score = intent.fatigue_score if intent.fatigue_score is not None else context.get("fatigue_score")
+            response = service.next_best_action(
+                user_id=user_id,
+                payload=DecisionNextBestActionRequest(
+                    query=intent.raw_text,
+                    fatigue_score=fatigue_score,
+                    time_available_minutes=intent.time_available_minutes,
+                ),
+            )
+            return self._format_next_action_reply(response)
+
+        if intent.intent_type == "PLAN_DAY":
+            service = self._require_service(self.decision_service, "decision")
+            plan = service.plan_day(
+                user_id=user_id,
+                payload=DecisionPlanDayRequest(fatigue_score=intent.fatigue_score or context.get("fatigue_score")),
+            )
+            return TelegramAgentReply(text=format_plan_day(plan), intent="plan_day")
+
+        if intent.intent_type == "CALENDAR_ACTION":
+            service = self._require_service(self.internal_calendar_service, "internal calendar")
+            blocks = service.list_blocks(
+                user_id=user_id,
+                filters=InternalCalendarListFilters(start=datetime.now(UTC), limit=5),
+            )
+            return TelegramAgentReply(text=format_calendar_blocks(blocks), intent="calendar_action")
+
+        service = self._require_service(self.decision_service, "decision")
+        response = service.query(
+            user_id=user_id,
+            payload=DecisionQueryRequest(
+                query=intent.raw_text,
+                fatigue_score=intent.fatigue_score or context.get("fatigue_score"),
+            ),
+        )
+        return TelegramAgentReply(
+            text=format_general_decision(response),
+            intent="general_decision",
+            reply_markup=self.build_task_reply_markup(task_id=response.primary_recommendation.task_id)
+            if response.primary_recommendation.task_id
+            else None,
+        )
+
+    def _format_next_action_reply(self, response: Any) -> TelegramAgentReply:
+        reply_markup = None
+        if getattr(response.primary_recommendation, "task_id", None):
+            reply_markup = self.build_task_reply_markup(task_id=response.primary_recommendation.task_id)
+        return TelegramAgentReply(
+            text=format_next_action(response),
+            intent="next_action",
+            reply_markup=reply_markup,
+        )
+
     def _extract_task_title(self, text: str) -> str:
         normalized = text.strip()
         for prefix in ("task:", "todo:", "add task:", "capture task:"):
@@ -399,3 +537,27 @@ class AgentService:
         if service is None:
             raise RuntimeError(f"{name} service is not configured")
         return service
+
+    def _log_interaction_event(self, *, user_id: str, event_type: str, payload: dict[str, Any]) -> None:
+        if self.decision_service is None or getattr(self.decision_service, "connection", None) is None:
+            return
+
+        connection = self.decision_service.connection
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    insert into interaction_events (
+                        user_id,
+                        event_type,
+                        entity_type,
+                        payload_json
+                    )
+                    values (%s, %s, 'agent', %s::jsonb)
+                    """,
+                    (user_id, event_type, json.dumps(payload)),
+                )
+            connection.commit()
+        except UndefinedTable:
+            connection.rollback()
+            logger.warning("interaction_events table not found; skipped %s event", event_type)
