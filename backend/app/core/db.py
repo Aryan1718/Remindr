@@ -15,11 +15,19 @@ def get_database_url() -> str:
     return database_url
 
 
+def connect_db(*, database_url: str | None = None) -> psycopg.Connection:
+    return psycopg.connect(
+        database_url or get_database_url(),
+        row_factory=dict_row,
+        prepare_threshold=None,
+    )
+
+
 def get_db_connection() -> Generator[psycopg.Connection, None, None]:
     database_url = get_database_url()
     parsed = urlparse(database_url)
     try:
-        connection = psycopg.connect(database_url, row_factory=dict_row)
+        connection = connect_db(database_url=database_url)
     except psycopg.OperationalError as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

@@ -30,3 +30,12 @@ class BaseLLMClient(ABC):
         max_tokens: int | None = None,
     ) -> LLMStructuredResult:
         raise NotImplementedError
+
+    @abstractmethod
+    def generate_embeddings(
+        self,
+        *,
+        texts: list[str],
+        model: str | None = None,
+    ) -> list[list[float]]:
+        raise NotImplementedError

@@ -32,6 +32,10 @@ def normalize_memory_statement(statement: str) -> str:
     return re.sub(r"\s+", " ", statement.strip()).casefold()
 
 
+def _vector_literal(values: Iterable[float]) -> str:
+    return "[" + ",".join(f"{float(value):.12g}" for value in values) + "]"
+
+
 class MemoryRepository:
     def __init__(self, connection: psycopg.Connection) -> None:
         self.connection = connection
@@ -212,7 +216,18 @@ class MemoryRepository:
         limit: int = 5,
         embedding: Iterable[float] | None = None,
     ) -> list[LearnedMemoryModel]:
-        _ = embedding
+        if embedding is not None:
+            vector = list(embedding)
+            if vector:
+                rows = self._get_relevant_memories_by_embedding(
+                    user_id=user_id,
+                    domain=domain,
+                    limit=limit,
+                    embedding=vector,
+                )
+                if rows:
+                    return rows
+
         memories = self.find_active_memories_for_user(user_id=user_id, domain=domain, limit=100)
         if not query:
             return memories[:limit]
@@ -233,3 +248,38 @@ class MemoryRepository:
         if keywords:
             ranked = [memory for memory in ranked if rank(memory)[0] > 0] or ranked
         return ranked[:limit]
+
+    def _get_relevant_memories_by_embedding(
+        self,
+        *,
+        user_id: str,
+        domain: str | None,
+        limit: int,
+        embedding: list[float],
+    ) -> list[LearnedMemoryModel]:
+        clauses = ["user_id = %s", "is_active = true", "embedding is not null"]
+        params: list[Any] = [user_id]
+        if domain is not None:
+            clauses.append("domain = %s")
+            params.append(domain)
+
+        vector_literal = _vector_literal(embedding)
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute(
+                    f"""
+                    select {LEARNED_MEMORY_COLUMNS}
+                    from learned_memories
+                    where {" and ".join(clauses)}
+                    order by embedding <=> %s::vector asc,
+                             confidence desc,
+                             coalesce(last_confirmed_at, updated_at, created_at) desc
+                    limit %s
+                    """,
+                    [*params, vector_literal, limit],
+                )
+                records = cursor.fetchall()
+        except psycopg.Error:
+            self.connection.rollback()
+            return []
+        return [LearnedMemoryModel.from_record(record) for record in records]

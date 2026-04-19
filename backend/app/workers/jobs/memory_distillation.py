@@ -6,9 +6,8 @@ from typing import Any
 
 import psycopg
 from psycopg.errors import UndefinedTable
-from psycopg.rows import dict_row
 
-from app.core.db import get_database_url
+from app.core.db import connect_db, get_database_url
 from app.services.memory_service import MemoryService
 
 
@@ -26,7 +25,7 @@ def distill_memories_job(
 ) -> dict[str, Any]:
     effective_now = as_of or datetime.now(UTC)
     owns_connection = connection is None
-    connection = connection or psycopg.connect(database_url or get_database_url(), row_factory=dict_row)
+    connection = connection or connect_db(database_url=database_url or get_database_url())
     service = MemoryService(connection)
 
     try:

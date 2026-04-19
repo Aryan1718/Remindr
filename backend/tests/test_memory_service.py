@@ -10,6 +10,8 @@ from app.services.memory_service import MemoryCandidate, MemoryService
 class InMemoryMemoryRepository:
     def __init__(self) -> None:
         self.memories: list[LearnedMemoryModel] = []
+        self.last_embedding = None
+        self.last_query = None
 
     def create_memory(self, **kwargs) -> LearnedMemoryModel:
         memory = LearnedMemoryModel(
@@ -64,8 +66,20 @@ class InMemoryMemoryRepository:
         return sorted(items, key=lambda item: item.updated_at or item.created_at or datetime.min.replace(tzinfo=UTC), reverse=True)[:limit]
 
     def get_relevant_memories(self, *, user_id: str, query: str | None, domain: str | None = None, limit: int = 5, embedding=None):
-        _ = (query, embedding)
-        return self.find_active_memories_for_user(user_id=user_id, domain=domain, limit=limit)
+        self.last_query = query
+        self.last_embedding = embedding
+        items = self.find_active_memories_for_user(user_id=user_id, domain=domain, limit=100)
+        if embedding is not None:
+            scored = []
+            for memory in items:
+                if not memory.embedding:
+                    continue
+                similarity = sum(float(left) * float(right) for left, right in zip(memory.embedding, embedding, strict=False))
+                scored.append((similarity, memory))
+            if scored:
+                scored.sort(key=lambda item: item[0], reverse=True)
+                return [memory for _, memory in scored[:limit]]
+        return items[:limit]
 
 
 class NoopSignalRepository:
@@ -87,7 +101,7 @@ class NoopSignalRepository:
 
 
 class MemoryServiceTests(unittest.TestCase):
-    def build_service(self) -> tuple[MemoryService, InMemoryMemoryRepository]:
+    def build_service(self, *, embedding_provider=None) -> tuple[MemoryService, InMemoryMemoryRepository]:
         memory_repository = InMemoryMemoryRepository()
         noop = NoopSignalRepository()
         service = MemoryService(
@@ -96,6 +110,7 @@ class MemoryServiceTests(unittest.TestCase):
             task_repository=noop,
             calendar_repository=noop,
             fatigue_repository=noop,
+            embedding_provider=embedding_provider,
         )
         return service, memory_repository
 
@@ -162,7 +177,7 @@ class MemoryServiceTests(unittest.TestCase):
         self.assertEqual(len(repository.memories), 1)
 
     def test_retrieval_returns_relevant_memories_and_excludes_inactive(self) -> None:
-        service, repository = self.build_service()
+        service, repository = self.build_service(embedding_provider=lambda text: [1.0, 0.0] if "short" in text else [0.0, 1.0])
         repository.create_memory(
             user_id="user-1",
             memory_type=MemoryType.PREFERENCE,
@@ -172,7 +187,7 @@ class MemoryServiceTests(unittest.TestCase):
             confidence=0.88,
             last_confirmed_at=datetime.now(UTC),
             metadata_json={"evidence_count": 3},
-            embedding=None,
+            embedding=[1.0, 0.0],
             is_active=True,
         )
         repository.create_memory(
@@ -184,7 +199,7 @@ class MemoryServiceTests(unittest.TestCase):
             confidence=0.8,
             last_confirmed_at=datetime.now(UTC),
             metadata_json={"evidence_count": 3},
-            embedding=None,
+            embedding=[0.0, 1.0],
             is_active=False,
         )
 
@@ -211,6 +226,94 @@ class MemoryServiceTests(unittest.TestCase):
         results = service.get_relevant_memories("user-1", "planning", domain="planning", limit=5)
 
         self.assertEqual(results, [])
+
+    def test_distilled_memory_creation_generates_and_stores_embedding(self) -> None:
+        calls: list[str] = []
+
+        def embedding_provider(text: str) -> list[float]:
+            calls.append(text)
+            return [0.25, 0.75]
+
+        service, repository = self.build_service(embedding_provider=embedding_provider)
+        candidate = MemoryCandidate(
+            user_id="user-1",
+            memory_type=MemoryType.PREFERENCE,
+            domain="planning",
+            statement="User prefers shorter focus blocks",
+            source=MemorySource.INFERRED,
+            confidence=0.82,
+            last_confirmed_at=datetime.now(UTC),
+            metadata_json={"evidence_count": 2, "recent_examples_count": 2, "contradiction_count": 0},
+        )
+
+        created = service.upsert_memory(candidate=candidate)
+
+        assert created is not None
+        self.assertEqual(calls, ["User prefers shorter focus blocks"])
+        self.assertEqual(created.embedding, [0.25, 0.75])
+
+    def test_vector_retrieval_uses_normalized_query_embedding(self) -> None:
+        queries: list[str] = []
+
+        def embedding_provider(text: str) -> list[float]:
+            queries.append(text)
+            if "tonight" in text.casefold():
+                return [0.0, 1.0]
+            return [1.0, 0.0]
+
+        service, repository = self.build_service(embedding_provider=embedding_provider)
+        repository.create_memory(
+            user_id="user-1",
+            memory_type=MemoryType.PATTERN,
+            domain="planning",
+            statement="User often avoids demanding evening work",
+            source=MemorySource.INFERRED,
+            confidence=0.91,
+            last_confirmed_at=datetime.now(UTC),
+            metadata_json={"evidence_count": 4},
+            embedding=[0.0, 1.0],
+            is_active=True,
+        )
+        repository.create_memory(
+            user_id="user-1",
+            memory_type=MemoryType.PREFERENCE,
+            domain="planning",
+            statement="User prefers shorter focus blocks",
+            source=MemorySource.INFERRED,
+            confidence=0.88,
+            last_confirmed_at=datetime.now(UTC),
+            metadata_json={"evidence_count": 3},
+            embedding=[1.0, 0.0],
+            is_active=True,
+        )
+
+        normalized = service.normalize_retrieval_query(query="Should I work on this tonight?", domain="planning")
+        results = service.get_relevant_memories("user-1", normalized, domain="planning", limit=2)
+
+        self.assertIsNotNone(normalized)
+        self.assertIn("tonight", normalized.casefold())
+        self.assertEqual(results[0]["statement"], "User often avoids demanding evening work")
+        self.assertEqual(queries[-1], normalized)
+
+    def test_embedding_failure_degrades_safely(self) -> None:
+        service, repository = self.build_service(embedding_provider=lambda text: (_ for _ in ()).throw(RuntimeError("boom")))
+        repository.create_memory(
+            user_id="user-1",
+            memory_type=MemoryType.PREFERENCE,
+            domain="planning",
+            statement="User prefers shorter focus blocks",
+            source=MemorySource.INFERRED,
+            confidence=0.88,
+            last_confirmed_at=datetime.now(UTC),
+            metadata_json={"evidence_count": 3},
+            embedding=None,
+            is_active=True,
+        )
+
+        results = service.get_relevant_memories("user-1", "short work block", domain="planning", limit=5)
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(repository.last_embedding, None)
 
 
 if __name__ == "__main__":

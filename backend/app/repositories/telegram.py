@@ -176,6 +176,36 @@ class TelegramRepository:
             logger.warning("interaction_events table not found; skipped %s event", event_type)
             return None
 
+    def has_processed_update(
+        self,
+        *,
+        user_id: str,
+        entity_id: str,
+        raw_update_id: int | str | None,
+    ) -> bool:
+        if raw_update_id is None:
+            return False
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    select 1
+                    from interaction_events
+                    where user_id = %s
+                      and entity_type = 'telegram'
+                      and entity_id = %s
+                      and payload_json ->> 'raw_update_id' = %s
+                      and event_type in ('telegram_message_received', 'telegram_callback_query_received')
+                    limit 1
+                    """,
+                    (user_id, entity_id, str(raw_update_id)),
+                )
+                return cursor.fetchone() is not None
+        except UndefinedTable:
+            self.connection.rollback()
+            logger.warning("interaction_events table not found; cannot dedupe telegram update")
+            return False
+
     def list_events(self, *, user_id: str, limit: int = 50) -> list[dict[str, Any]]:
         try:
             with self.connection.cursor() as cursor:

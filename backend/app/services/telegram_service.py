@@ -187,19 +187,17 @@ class TelegramService:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid Telegram webhook secret")
 
         parsed_update = self._extract_update(update)
-        onboarding_active = self._is_onboarding_active(user_id) if self._is_confirmed(metadata) else False
-        if parsed_update["update_type"] == "message" and parsed_update.get("text"):
-            self.repository.log_event(
-                user_id=user_id,
-                event_type="telegram_user_message",
-                entity_id=connector.id,
-                payload={
-                    "text": parsed_update.get("text"),
-                    "telegram_user_id": parsed_update.get("telegram_user_id"),
-                    "telegram_chat_id": parsed_update.get("telegram_chat_id"),
-                    "raw_update_id": parsed_update.get("raw_update_id"),
-                },
+        if self.repository.has_processed_update(
+            user_id=user_id,
+            entity_id=connector.id,
+            raw_update_id=parsed_update.get("raw_update_id"),
+        ):
+            return TelegramWebhookResult(
+                linked=metadata.get("telegram_chat_id") is not None,
+                update_type=parsed_update["update_type"],
+                event_id="",
             )
+        onboarding_active = self._is_onboarding_active(user_id) if self._is_confirmed(metadata) else False
         metadata["last_event_at"] = _utcnow().isoformat()
         if self._is_confirmed(metadata):
             metadata["telegram_user_id"] = parsed_update["telegram_user_id"] or metadata.get("telegram_user_id")
