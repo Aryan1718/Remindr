@@ -18,6 +18,47 @@ interface MockDb {
   onboarding: OnboardingDraft;
 }
 
+const onboardingDefaults: OnboardingDraft = {
+  stage: "onboarding",
+  name: "Chris",
+  timezone: "UTC-8 (Pacific Time)",
+  role: "professional",
+  bio: "",
+  wakeTime: "07:00",
+  sleepTime: "23:00",
+  workStart: "09:00",
+  workEnd: "17:00",
+  workHours: "9:00 AM - 5:00 PM",
+  commitments: "Tue/Thu meetings, evening gym",
+  focusWindow: "morning",
+  weekendPattern: "flexible",
+  decisionStyle: "Direct recommendation",
+  reminderTolerance: "Balanced",
+  fatigueCheckIn: "Only when needed",
+  recommendationStyle: "Balanced",
+  reminderStyle: "Gentle",
+  notificationFrequency: "Moderate",
+  quietHoursStart: "22:00",
+  quietHoursEnd: "08:00",
+  goalTitle: "Land the MVP planning sprint",
+  goalHorizon: "4 weeks",
+  goalImportance: "High",
+  goalNotes: "Need steady progress without overload.",
+  tasks: [],
+  connectors: [],
+  telegramConnected: false,
+  completed: false,
+};
+
+function normalizeOnboardingDraft(draft?: Partial<OnboardingDraft>): OnboardingDraft {
+  return {
+    ...onboardingDefaults,
+    ...draft,
+    tasks: draft?.tasks ? draft.tasks.map((task) => ({ ...task })) : [],
+    connectors: draft?.connectors ? [...draft.connectors] : [],
+  };
+}
+
 const seedTasks: Task[] = [
   {
     id: "task-1",
@@ -126,27 +167,7 @@ const seedSettings: ProfileSettings = {
   },
 };
 
-const seedOnboarding: OnboardingDraft = {
-  stage: "onboarding",
-  name: "Chris",
-  timezone: "America/Los_Angeles",
-  role: "Professional",
-  wakeTime: "07:00",
-  sleepTime: "23:00",
-  workHours: "9:00 AM - 5:00 PM",
-  commitments: "Tue/Thu meetings, evening gym",
-  focusWindow: "10:00 AM - 12:00 PM",
-  decisionStyle: "Direct recommendation",
-  reminderTolerance: "Balanced",
-  fatigueCheckIn: "Only when needed",
-  goalTitle: "Land the MVP planning sprint",
-  goalHorizon: "4 weeks",
-  goalImportance: "High",
-  goalNotes: "Need steady progress without overload.",
-  connectors: [],
-  telegramConnected: false,
-  completed: false,
-};
+const seedOnboarding: OnboardingDraft = normalizeOnboardingDraft();
 
 const seedDb: MockDb = {
   dashboard: {
@@ -191,7 +212,12 @@ function loadDb(): MockDb {
   if (!raw) return seedDb;
 
   try {
-    return JSON.parse(raw) as MockDb;
+    const parsed = JSON.parse(raw) as Partial<MockDb>;
+    return {
+      ...seedDb,
+      ...parsed,
+      onboarding: normalizeOnboardingDraft(parsed.onboarding),
+    };
   } catch {
     return seedDb;
   }
