@@ -35,6 +35,8 @@ from app.schemas.internal_calendar import (
     InternalCalendarSuggestRequest,
 )
 from app.schemas.task import CompleteTaskRequest, TaskRead
+from app.services.notification_service import NotificationService
+from app.workers.rq import enqueue_memory_distillation
 
 
 @dataclass(slots=True)
@@ -94,6 +96,7 @@ class InternalCalendarService:
         self.fatigue_repository = fatigue_repository or self._require_repo(FatigueRepository, connection)
         self.connector_repository = connector_repository or self._require_repo(ConnectorRepository, connection)
         self.user_repository = user_repository or self._require_repo(UserRepository, connection)
+        self.enqueue_memory_distillation = enqueue_memory_distillation
 
     def suggest_blocks(
         self,
@@ -285,6 +288,7 @@ class InternalCalendarService:
             block_id=block_id,
             user_id=user_id,
             response_type=FeedbackResponseType.ACCEPTED,
+            trigger_source="calendar_confirm",
             reason_text=payload.reason_text,
             fatigue_score=payload.fatigue_score,
             event_type="suggestion_accepted",
@@ -320,6 +324,7 @@ class InternalCalendarService:
             block_id=block_id,
             user_id=user_id,
             response_type=FeedbackResponseType.REJECTED,
+            trigger_source="calendar_reject",
             reason_code=payload.reason_code,
             reason_text=payload.reason_text,
             fatigue_score=payload.fatigue_score,
@@ -408,6 +413,7 @@ class InternalCalendarService:
             block_id=block_id,
             user_id=user_id,
             response_type=FeedbackResponseType.MOVED,
+            trigger_source="calendar_reschedule",
             reason_code=payload.reason_code,
             reason_text=payload.reason_text,
             fatigue_score=payload.fatigue_score,
@@ -456,6 +462,7 @@ class InternalCalendarService:
             block_id=block_id,
             user_id=user_id,
             response_type=FeedbackResponseType.COMPLETED,
+            trigger_source="calendar_feedback",
             reason_text=payload.notes,
             event_type="suggestion_completed",
             payload={"task_completed": payload.task_completed},
@@ -485,6 +492,7 @@ class InternalCalendarService:
             block_id=block_id,
             user_id=user_id,
             response_type=payload.response_type,
+            trigger_source="calendar_feedback",
             reason_code=payload.reason_code,
             reason_text=payload.reason_text,
             fatigue_score=payload.fatigue_score,
@@ -492,6 +500,15 @@ class InternalCalendarService:
             payload={"response_type": payload.response_type.value},
         )
         return CalendarFeedbackRead.from_model(feedback)
+
+    def queue_block_reminder(self, *, user_id: str, block_id: str) -> tuple[object, object | None]:
+        block = self._require_block(block_id=block_id, user_id=user_id)
+        user = self.user_repository.get_user(user_id)
+        notification_service = NotificationService(self.connection)
+        return notification_service.queue_internal_calendar_suggestion_reminder(
+            block=block,
+            timezone_name=(user.timezone if user is not None else None),
+        )
 
     def _require_block(self, *, block_id: str, user_id: str):
         block = self.repository.get_block(block_id=block_id, user_id=user_id)
@@ -518,6 +535,7 @@ class InternalCalendarService:
         block_id: str,
         user_id: str,
         response_type: FeedbackResponseType,
+        trigger_source: str,
         event_type: str,
         payload: dict[str, object],
         reason_code: str | None = None,
@@ -542,6 +560,12 @@ class InternalCalendarService:
                 **({"reason_code": reason_code} if reason_code is not None else {}),
                 **({"fatigue_score": fatigue_score} if fatigue_score is not None else {}),
             },
+        )
+        self.enqueue_memory_distillation(
+            user_id=user_id,
+            trigger_source=trigger_source,
+            entity_type="calendar_feedback",
+            entity_id=feedback.id,
         )
         return feedback
 

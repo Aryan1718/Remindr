@@ -298,4 +298,24 @@ class FatigueRepository:
         except UndefinedTable:
             self.connection.rollback()
             logger.warning("interaction_events table not found; skipped %s event", event_type)
-            return None
+
+    def list_patterns_for_distillation(
+        self,
+        *,
+        user_id: str,
+        min_confidence: float = 0.0,
+        limit: int = 50,
+    ) -> list[FatiguePatternModel]:
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                f"""
+                select {FATIGUE_PATTERN_COLUMNS}
+                from fatigue_patterns
+                where user_id = %s and confidence >= %s
+                order by confidence desc, coalesce(last_computed_at, last_signal_at) desc
+                limit %s
+                """,
+                (user_id, min_confidence, limit),
+            )
+            records = cursor.fetchall()
+        return [FatiguePatternModel.from_record(record) for record in records]

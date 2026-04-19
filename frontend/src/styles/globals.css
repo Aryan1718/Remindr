@@ -2,6 +2,13 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --remindr-ui-font: "Avenir Light", "Avenir LT Std 35 Light", "Avenir Next", Avenir,
+    "Helvetica Neue", Arial, sans-serif;
+  --remindr-brand-font: "Baskerville Bold", Baskerville, "Baskerville Old Face",
+    "Hoefler Text", "Times New Roman", serif;
+}
+
 html {
   background: var(--color-surface);
   color-scheme: dark;
@@ -11,13 +18,15 @@ html {
 
 body {
   margin: 0;
-  font-family: "Arial Narrow", Arial, Helvetica, sans-serif;
+  font-family: var(--remindr-ui-font);
   color: var(--color-ink);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, rgba(255, 255, 255, 0) 14%),
     radial-gradient(circle at 20% 0%, rgba(255, 192, 0, 0.1), transparent 22%),
     radial-gradient(circle at 84% 12%, rgba(41, 171, 226, 0.1), transparent 18%),
     linear-gradient(180deg, #000000 0%, #050505 100%);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 * {
@@ -39,6 +48,12 @@ textarea {
 ::selection {
   background: rgba(255, 192, 0, 0.28);
   color: #000000;
+}
+
+.remindr-wordmark {
+  font-family: var(--remindr-brand-font);
+  font-weight: 900;
+  letter-spacing: 0.01em;
 }
 
 @keyframes remindr-login-card-entry {
@@ -198,4 +213,465 @@ textarea {
   border-radius: 999px;
   background: rgba(103, 232, 249, 0.22);
   background-clip: padding-box;
+}
+
+@keyframes remindr-connector-page-entry {
+  0% {
+    opacity: 0;
+    transform: translateY(22px);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes remindr-connector-card-entry {
+  0% {
+    opacity: 0;
+    transform: translateY(30px) scale(0.96);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes remindr-connector-particle {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 24px, 0) scale(0.85);
+  }
+
+  20%,
+  80% {
+    opacity: 0.55;
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate3d(0, -44px, 0) scale(1.05);
+  }
+}
+
+@keyframes remindr-jellyfish-drift-a {
+  0%, 100% {
+    transform: translate3d(0, 0, 0);
+  }
+
+  25% {
+    transform: translate3d(18px, -18px, 0);
+  }
+
+  55% {
+    transform: translate3d(-20px, 14px, 0);
+  }
+
+  80% {
+    transform: translate3d(10px, -10px, 0);
+  }
+}
+
+@keyframes remindr-jellyfish-drift-b {
+  0%, 100% {
+    transform: translate3d(0, 0, 0);
+  }
+
+  30% {
+    transform: translate3d(22px, -24px, 0);
+  }
+
+  58% {
+    transform: translate3d(-16px, 12px, 0);
+  }
+
+  82% {
+    transform: translate3d(12px, -8px, 0);
+  }
+}
+
+@keyframes remindr-jellyfish-drift-c {
+  0%, 100% {
+    transform: translate3d(0, 0, 0);
+  }
+
+  28% {
+    transform: translate3d(-18px, -22px, 0);
+  }
+
+  60% {
+    transform: translate3d(16px, 14px, 0);
+  }
+
+  84% {
+    transform: translate3d(-10px, -10px, 0);
+  }
+}
+
+@keyframes remindr-jellyfish-bell {
+  0%, 100% {
+    transform: translateY(0) scale(1);
+  }
+
+  50% {
+    transform: translateY(-4px) scale(1.018);
+  }
+}
+
+@keyframes remindr-jellyfish-tentacle-a {
+  0%, 100% {
+    transform: rotate(-2deg) translateX(0);
+  }
+
+  50% {
+    transform: rotate(4deg) translateX(4px);
+  }
+}
+
+@keyframes remindr-jellyfish-tentacle-b {
+  0%, 100% {
+    transform: rotate(3deg) translateX(0);
+  }
+
+  50% {
+    transform: rotate(-5deg) translateX(-4px);
+  }
+}
+
+@keyframes remindr-jellyfish-tentacle-c {
+  0%, 100% {
+    transform: rotate(0deg) translateX(0);
+  }
+
+  50% {
+    transform: rotate(3deg) translateX(3px);
+  }
+}
+
+@keyframes remindr-connector-sync-dot {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.35;
+    transform: scale(0.75);
+  }
+}
+
+@keyframes remindr-jellyfish-connected-glow {
+  0%, 100% {
+    opacity: 0.88;
+    filter: blur(48px);
+  }
+
+  50% {
+    opacity: 1;
+    filter: blur(58px);
+  }
+}
+
+.remindr-connector-page-entry {
+  animation: remindr-connector-page-entry 0.75s ease-out both;
+}
+
+.remindr-connector-card-entry {
+  animation: remindr-connector-card-entry 0.9s ease-out both;
+}
+
+.remindr-connector-particle {
+  animation: remindr-connector-particle 20s linear infinite;
+}
+
+.remindr-jellyfish-drift-a {
+  animation: remindr-jellyfish-drift-a 18s ease-in-out infinite;
+}
+
+.remindr-jellyfish-drift-b {
+  animation: remindr-jellyfish-drift-b 20s ease-in-out infinite;
+}
+
+.remindr-jellyfish-drift-c {
+  animation: remindr-jellyfish-drift-c 19s ease-in-out infinite;
+}
+
+.remindr-jellyfish-bell {
+  animation: remindr-jellyfish-bell 4.8s ease-in-out infinite;
+}
+
+.remindr-jellyfish-tentacle-a,
+.remindr-jellyfish-tentacle-b,
+.remindr-jellyfish-tentacle-c {
+  transform-origin: top center;
+}
+
+.remindr-jellyfish-tentacle-a {
+  animation: remindr-jellyfish-tentacle-a 4.6s ease-in-out infinite;
+}
+
+.remindr-jellyfish-tentacle-b {
+  animation: remindr-jellyfish-tentacle-b 5.2s ease-in-out infinite;
+}
+
+.remindr-jellyfish-tentacle-c {
+  animation: remindr-jellyfish-tentacle-c 4.2s ease-in-out infinite;
+}
+
+.remindr-connector-sync-dot {
+  animation: remindr-connector-sync-dot 1.4s ease-in-out infinite;
+}
+
+.remindr-jellyfish-connected-glow {
+  animation: remindr-jellyfish-connected-glow 2.4s ease-in-out infinite;
+}
+
+@keyframes remindr-channel-page-entry {
+  0% {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes remindr-channel-card-entry {
+  0% {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes remindr-channel-particle {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0);
+  }
+
+  50% {
+    opacity: 0.6;
+    transform: translate3d(0, -100px, 0);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes remindr-channel-glow {
+  0%, 100% {
+    opacity: 0.2;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.4;
+    transform: scale(1.18);
+  }
+}
+
+@keyframes remindr-channel-light-ray {
+  0%, 100% {
+    opacity: 0.1;
+  }
+
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.remindr-channel-page-entry {
+  animation: remindr-channel-page-entry 1s ease-out both;
+}
+
+.remindr-channel-card-entry {
+  animation: remindr-channel-card-entry 1s ease-out 0.3s both;
+}
+
+.remindr-channel-particle {
+  animation: remindr-channel-particle 10s ease-in-out infinite;
+}
+
+.remindr-channel-glow {
+  animation: remindr-channel-glow 4s ease-in-out infinite;
+}
+
+.remindr-channel-light-ray {
+  animation: remindr-channel-light-ray 6s ease-in-out infinite;
+}
+
+.remindr-channel-message {
+  animation: remindr-onboarding-step-entry 0.25s ease-out;
+}
+
+@keyframes remindr-dashboard-particle {
+  0%, 100% {
+    opacity: 0.18;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+
+  50% {
+    opacity: 0.58;
+    transform: translate3d(0, -30px, 0) scale(1.08);
+  }
+}
+
+@keyframes remindr-dashboard-panel-entry {
+  0% {
+    opacity: 0;
+    transform: translateY(24px) scale(0.985);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes remindr-dashboard-wave-sweep {
+  0% {
+    transform: translate3d(0, 0, 0) skewX(-2deg);
+  }
+
+  100% {
+    transform: translate3d(198vw, 0, 0) skewX(1.5deg);
+  }
+}
+
+.remindr-dashboard-particle {
+  animation: remindr-dashboard-particle 7s ease-in-out infinite;
+}
+
+.remindr-dashboard-panel-entry {
+  animation: remindr-dashboard-panel-entry 0.8s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.remindr-dashboard-wave-sweep {
+  animation: remindr-dashboard-wave-sweep 2.25s cubic-bezier(0.43, 0.13, 0.23, 0.96) forwards;
+  filter: saturate(1.2);
+}
+
+.remindr-ocean-cursor-scope,
+.remindr-ocean-cursor-scope * {
+  cursor: none !important;
+}
+
+.remindr-ocean-cursor {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 80;
+  width: 108px;
+  height: 108px;
+  margin-top: -54px;
+  margin-left: -54px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.45s ease;
+  will-change: transform, opacity;
+}
+
+.remindr-ocean-cursor[data-visible="true"] {
+  opacity: 1;
+}
+
+.remindr-ocean-cursor-core {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.34);
+  box-shadow: 0 0 28px rgba(166, 236, 255, 0.18);
+  transition: opacity 0.24s ease, transform 0.24s ease;
+}
+
+.remindr-ocean-cursor-drop {
+  --remindr-cursor-scale: 0.78;
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  opacity: 0.5;
+  transform: scale(var(--remindr-cursor-scale));
+  transition: transform 5s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease;
+  animation: remindr-ocean-cursor-float 3.2s ease-in-out infinite;
+  filter: drop-shadow(0 0 20px rgba(125, 227, 255, 0.24));
+}
+
+.remindr-ocean-cursor-svg {
+  width: 112px;
+  height: 112px;
+  overflow: visible;
+}
+
+.remindr-ocean-cursor-shadow,
+.remindr-ocean-cursor-outline {
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: transform 0.78s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease;
+}
+
+.remindr-ocean-cursor-shadow {
+  fill: rgba(4, 27, 49, 0.22);
+  transform: translate(-2%, 2%);
+}
+
+.remindr-ocean-cursor-outline {
+  fill: none;
+  stroke: rgba(231, 250, 255, 0.72);
+  stroke-width: 1.5;
+  opacity: 0.78;
+}
+
+.remindr-ocean-cursor[data-active="true"] .remindr-ocean-cursor-core {
+  opacity: 0;
+  transform: scale(0.7);
+}
+
+.remindr-ocean-cursor[data-active="true"] .remindr-ocean-cursor-drop {
+  --remindr-cursor-scale: 1.54;
+  opacity: 0.5;
+}
+
+.remindr-ocean-cursor[data-active="true"] .remindr-ocean-cursor-shadow {
+  transform: translate(-3.5%, 3.5%);
+}
+
+.remindr-ocean-cursor[data-active="true"] .remindr-ocean-cursor-outline {
+  opacity: 0.78;
+}
+
+@keyframes remindr-ocean-cursor-float {
+  0%,
+  100% {
+    transform: translateY(0) scale(var(--remindr-cursor-scale));
+  }
+
+  50% {
+    transform: translateY(-5px) scale(var(--remindr-cursor-scale));
+  }
+}
+
+@media (hover: none), (pointer: coarse), (max-width: 63.98rem) {
+  .remindr-ocean-cursor {
+    display: none;
+  }
+
+  .remindr-ocean-cursor-scope,
+  .remindr-ocean-cursor-scope * {
+    cursor: auto !important;
+  }
 }

@@ -2,7 +2,7 @@ fastapi
 uvicorn
 pydantic
 python-dotenv
-psycopg
+psycopg[binary]
 PyJWT[crypto]
 httpx
 python-multipart

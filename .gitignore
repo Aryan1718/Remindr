@@ -43,3 +43,5 @@ Thumbs.db
 # Local runtime files
 tmp/
 temp/
+
+.pytest_cache/

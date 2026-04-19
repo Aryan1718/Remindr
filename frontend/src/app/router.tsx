@@ -1,6 +1,8 @@
 import { Navigate, RouterProvider, createBrowserRouter } from "react-router-dom";
 import { ProtectedRoute, PublicOnlyRoute } from "@/components/auth/AuthGate";
+import { ChannelPage } from "@/pages/ChannelPage";
 import { ConnectorCallbackPage } from "@/pages/ConnectorCallbackPage";
+import { DashboardPage } from "@/pages/DashboardPage";
 import { GoogleCalendarConnectPage } from "@/pages/GoogleCalendarConnectPage";
 import { IntegrationsPage } from "@/pages/IntegrationsPage";
 import { LoginPage } from "@/pages/LoginPage";
@@ -36,12 +38,7 @@ const router = createBrowserRouter([
     children: [
       {
         path: "/dashboard",
-        element: (
-          <RoutePlaceholderPage
-            description="The dashboard has been cleared so the next redesign can replace it cleanly."
-            title="Dashboard"
-          />
-        ),
+        element: <DashboardPage />,
       },
       {
         path: "/tasks",
@@ -86,6 +83,10 @@ const router = createBrowserRouter([
       {
         path: "/integrations/google-calendar",
         element: <GoogleCalendarConnectPage />,
+      },
+      {
+        path: "/channel",
+        element: <ChannelPage />,
       },
       {
         path: "/settings",

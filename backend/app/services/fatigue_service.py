@@ -61,6 +61,7 @@ class FatigueService:
         repository: FatigueRepository | None = None,
     ) -> None:
         self.repository = repository or FatigueRepository(connection)
+        self.enqueue_fatigue_pattern_recompute = enqueue_fatigue_pattern_recompute
 
     def create_checkin(self, *, user_id: str, payload: FatigueCheckinCreateRequest) -> FatigueCheckinRead:
         checkin = self.repository.create_checkin(user_id=user_id, payload=payload)
@@ -69,6 +70,11 @@ class FatigueService:
             event_type="fatigue_checkin_submitted",
             entity_id=checkin.id,
             payload={"score": checkin.score, "source": checkin.source},
+        )
+        self.enqueue_fatigue_pattern_recompute(
+            user_id=user_id,
+            days_back=90,
+            mode="async",
         )
         return FatigueCheckinRead.from_model(checkin)
 

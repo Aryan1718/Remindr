@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, date, datetime, timedelta
 
 from app.models.internal_calendar import CalendarBlockStatus, CalendarBlockType, InternalCalendarBlockModel
+from app.models.memory import MemorySource, MemoryType
 from app.models.task import TaskModel, TaskStatus
 from app.models.user import UserModel, UserPreferencesModel
 from app.schemas.decision import DecisionNextBestActionRequest, DecisionPlanDayRequest, DecisionQueryRequest
@@ -79,6 +80,16 @@ class FakeFatigueService:
         )
 
 
+class FakeMemoryService:
+    def __init__(self, memories: list[dict] | None = None) -> None:
+        self.memories = memories or []
+        self.calls: list[tuple[str, str | None, str | None, int]] = []
+
+    def get_relevant_memories(self, user_id: str, query: str | None, domain: str | None = None, limit: int = 5) -> list[dict]:
+        self.calls.append((user_id, query, domain, limit))
+        return self.memories[:limit]
+
+
 def build_task(
     *,
     task_id: str,
@@ -136,7 +147,8 @@ def build_service(
     tasks: list[TaskModel],
     blocks: list[InternalCalendarBlockModel] | None = None,
     fatigue_score: int = 2,
-) -> tuple[DecisionService, FakeFatigueService, FakeTaskRepository]:
+    memories: list[dict] | None = None,
+) -> tuple[DecisionService, FakeFatigueService, FakeTaskRepository, FakeMemoryService]:
     user = UserModel(
         id="user-1",
         auth_user_id="auth-1",
@@ -154,25 +166,27 @@ def build_service(
     )
     task_repo = FakeTaskRepository(tasks)
     fatigue_service = FakeFatigueService(score=fatigue_score)
+    memory_service = FakeMemoryService(memories)
     service = DecisionService(
         task_repository=task_repo,
         calendar_repository=FakeCalendarRepository(blocks or []),
         user_repository=FakeUserRepository(user, preferences),
         fatigue_service=fatigue_service,
+        memory_service=memory_service,
     )
-    return service, fatigue_service, task_repo
+    return service, fatigue_service, task_repo, memory_service
 
 
 def test_query_mode_changes_with_fatigue() -> None:
     tasks = [build_task(task_id="a", due_in_hours=8, priority=4, energy_required=2)]
 
-    decisive_service, _, _ = build_service(tasks=tasks, fatigue_score=4)
+    decisive_service, _, _, _ = build_service(tasks=tasks, fatigue_score=4)
     decisive = decisive_service.query(
         user_id="user-1",
         payload=DecisionQueryRequest(query="What should I do first tonight?"),
     )
 
-    guided_service, _, _ = build_service(tasks=tasks, fatigue_score=2)
+    guided_service, _, _, _ = build_service(tasks=tasks, fatigue_score=2)
     guided = guided_service.query(
         user_id="user-1",
         payload=DecisionQueryRequest(query="What should I focus on next?"),
@@ -187,7 +201,7 @@ def test_next_best_action_returns_one_recommendation() -> None:
         build_task(task_id="a", due_in_hours=4, priority=4),
         build_task(task_id="b", due_in_hours=20, priority=3),
     ]
-    service, _, _ = build_service(tasks=tasks, fatigue_score=5)
+    service, _, _, _ = build_service(tasks=tasks, fatigue_score=5)
 
     response = service.next_best_action(
         user_id="user-1",
@@ -203,7 +217,7 @@ def test_scoring_prefers_nearer_deadline_when_other_factors_are_similar() -> Non
         build_task(task_id="near", due_in_hours=6, priority=3, estimated_minutes=30, energy_required=2),
         build_task(task_id="later", due_in_hours=72, priority=3, estimated_minutes=30, energy_required=2),
     ]
-    service, _, _ = build_service(tasks=tasks)
+    service, _, _, _ = build_service(tasks=tasks)
 
     response = service.query(
         user_id="user-1",
@@ -218,7 +232,7 @@ def test_high_energy_task_is_deprioritized_when_fatigue_is_high() -> None:
         build_task(task_id="heavy", due_in_hours=24, priority=4, estimated_minutes=30, energy_required=5),
         build_task(task_id="light", due_in_hours=24, priority=4, estimated_minutes=30, energy_required=1),
     ]
-    service, _, _ = build_service(tasks=tasks, fatigue_score=5)
+    service, _, _, _ = build_service(tasks=tasks, fatigue_score=5)
 
     response = service.query(
         user_id="user-1",
@@ -234,7 +248,7 @@ def test_planned_soon_task_penalty_works() -> None:
         build_task(task_id="free", due_in_hours=24, priority=4, estimated_minutes=30, energy_required=2),
     ]
     blocks = [build_block(task_id="planned", starts_in_hours=1)]
-    service, _, _ = build_service(tasks=tasks, blocks=blocks, fatigue_score=2)
+    service, _, _, _ = build_service(tasks=tasks, blocks=blocks, fatigue_score=2)
 
     response = service.query(
         user_id="user-1",
@@ -249,7 +263,7 @@ def test_owner_scoping_is_preserved() -> None:
         build_task(task_id="mine", user_id="user-1", due_in_hours=10),
         build_task(task_id="other", user_id="user-2", due_in_hours=1),
     ]
-    service, _, task_repo = build_service(tasks=tasks)
+    service, _, task_repo, _ = build_service(tasks=tasks)
 
     response = service.query(
         user_id="user-1",
@@ -262,7 +276,7 @@ def test_owner_scoping_is_preserved() -> None:
 
 def test_explicit_fatigue_override_beats_pattern_estimate() -> None:
     tasks = [build_task(task_id="a", due_in_hours=6, priority=4, energy_required=2)]
-    service, fatigue_service, _ = build_service(tasks=tasks, fatigue_score=1)
+    service, fatigue_service, _, _ = build_service(tasks=tasks, fatigue_score=1)
 
     response = service.query(
         user_id="user-1",
@@ -274,7 +288,7 @@ def test_explicit_fatigue_override_beats_pattern_estimate() -> None:
 
 
 def test_empty_task_list_returns_clean_no_work_response() -> None:
-    service, _, _ = build_service(tasks=[], fatigue_score=3)
+    service, _, _, _ = build_service(tasks=[], fatigue_score=3)
 
     response = service.query(
         user_id="user-1",
@@ -290,7 +304,7 @@ def test_plan_day_returns_light_summary() -> None:
         build_task(task_id="a", due_in_hours=8, priority=5, estimated_minutes=45, energy_required=2),
         build_task(task_id="b", due_in_hours=24, priority=4, estimated_minutes=30, energy_required=2),
     ]
-    service, _, _ = build_service(tasks=tasks, fatigue_score=2)
+    service, _, _, _ = build_service(tasks=tasks, fatigue_score=2)
 
     response = service.plan_day(
         user_id="user-1",
@@ -299,3 +313,34 @@ def test_plan_day_returns_light_summary() -> None:
 
     assert response.recommendations
     assert response.summary
+
+
+def test_decision_service_loads_memory_context_without_breaking_response() -> None:
+    tasks = [
+        build_task(task_id="short", due_in_hours=24, priority=4, estimated_minutes=30, energy_required=2),
+        build_task(task_id="long", due_in_hours=24, priority=4, estimated_minutes=120, energy_required=2),
+    ]
+    service, _, _, memory_service = build_service(
+        tasks=tasks,
+        fatigue_score=2,
+        memories=[
+            {
+                "id": "memory-1",
+                "domain": "planning",
+                "statement": "User prefers shorter focus blocks",
+                "memory_type": MemoryType.PREFERENCE.value,
+                "source": MemorySource.INFERRED.value,
+                "confidence": 0.9,
+                "metadata_json": {"preferred_duration_minutes": 45},
+            }
+        ],
+    )
+
+    response = service.query(
+        user_id="user-1",
+        payload=DecisionQueryRequest(query="What should I focus on next?", domain_hint="planning"),
+    )
+
+    assert response.primary_recommendation.task_id == "short"
+    assert memory_service.calls[0][0] == "user-1"
+    assert memory_service.calls[0][2] == "planning"

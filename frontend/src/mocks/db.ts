@@ -143,6 +143,14 @@ const seedIntegrations: Integration[] = [
     permissions: ["Read message metadata", "Read sender and labels"],
   },
   {
+    id: "outlook",
+    provider: "Outlook",
+    status: "Not connected",
+    lastSync: "Not linked",
+    description: "Used to pull work communication signals and confirmed scheduling context.",
+    permissions: ["Read mailbox metadata", "Read calendar metadata"],
+  },
+  {
     id: "telegram",
     provider: "Telegram",
     status: "Connected",

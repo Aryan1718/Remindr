@@ -340,19 +340,27 @@ export function OnboardingPage() {
   async function finishOnboarding() {
     if (!validateStep(currentStep)) return;
 
-    const draft = mapFormStateToDraft(formState, onboardingDraft, true);
+    const draft = {
+      ...mapFormStateToDraft(formState, onboardingDraft, false),
+      stage: "connectors" as const,
+      connectors: [],
+      telegramConnected: false,
+      completed: false,
+    };
     await saveOnboardingMutation.mutateAsync(draft);
-    navigate("/dashboard");
+    navigate("/integrations");
   }
 
   function renderWelcomeStep() {
     return (
       <div className="mx-auto max-w-xl py-12 text-center remindr-onboarding-step-entry">
-        <h2 className="text-4xl text-white">Set up Remindr</h2>
+        <h2 className="text-4xl text-white">
+          Set up <span className="remindr-wordmark">Remindr</span>
+        </h2>
         <p className="mt-6 text-lg leading-relaxed text-cyan-100/70">
           Remindr learns your daily routine and active workload to build more intelligent task
           recommendations. This setup shapes how the assistant schedules work, respects energy, and
-          nudges you through Telegram.
+          prepares your planning flow before you connect services.
         </p>
         <button
           className="group mx-auto mt-12 flex items-center gap-3 rounded-xl border border-cyan-400/30 bg-gradient-to-r from-cyan-500/20 to-teal-500/20 px-8 py-4 text-cyan-100 transition-all duration-300 hover:border-cyan-400/50 hover:from-cyan-500/30 hover:to-teal-500/30"
@@ -820,27 +828,6 @@ export function OnboardingPage() {
           </div>
         </div>
 
-        <div className="rounded-xl border border-white/10 bg-white/5 p-5">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h3 className="text-base text-white">Telegram connection</h3>
-              <p className="mt-1 text-sm text-cyan-100/60">
-                Chat stays in Telegram. The dashboard remains view-only.
-              </p>
-            </div>
-            <button
-              className={`rounded-full border px-4 py-2 text-sm transition-all duration-200 ${
-                formState.telegramConnected
-                  ? "border-cyan-400/50 bg-cyan-500/25 text-cyan-50"
-                  : "border-white/15 bg-white/5 text-white/70 hover:border-white/25 hover:bg-white/10"
-              }`}
-              onClick={() => updateFormState("telegramConnected", !formState.telegramConnected)}
-              type="button"
-            >
-              {formState.telegramConnected ? "Connected" : "Connect later"}
-            </button>
-          </div>
-        </div>
       </div>
     );
   }
@@ -959,10 +946,6 @@ export function OnboardingPage() {
                 {formState.quietHoursStart} - {formState.quietHoursEnd}
               </p>
             </div>
-            <div className="sm:col-span-2">
-              <p className="mb-1 text-cyan-100/60">Telegram</p>
-              <p className="text-white">{formState.telegramConnected ? "Connected" : "Connect later"}</p>
-            </div>
           </div>
         </div>
 
@@ -973,7 +956,7 @@ export function OnboardingPage() {
           type="button"
         >
           <CheckCircle2 className="h-5 w-5" />
-          <span>{saveOnboardingMutation.isPending ? "Finishing..." : "Finish Onboarding"}</span>
+          <span>{saveOnboardingMutation.isPending ? "Saving..." : "Continue to Connectors"}</span>
         </button>
       </div>
     );
@@ -989,15 +972,7 @@ export function OnboardingPage() {
   }
 
   return (
-    <div
-      className="relative h-screen min-h-screen overflow-hidden bg-gradient-to-b from-[#000810] via-[#001428] to-[#002040] text-white"
-      style={{
-        fontFamily:
-          '-apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif',
-        WebkitFontSmoothing: "antialiased",
-        MozOsxFontSmoothing: "grayscale",
-      }}
-    >
+    <div className="relative h-screen min-h-screen overflow-hidden bg-gradient-to-b from-[#000810] via-[#001428] to-[#002040] text-white">
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
         <div className="absolute inset-0 opacity-10">
           <div
@@ -1052,7 +1027,7 @@ export function OnboardingPage() {
 
             <div className="relative flex h-full flex-col">
               <div className="flex-shrink-0 px-5 pb-4 pt-6 sm:px-8 sm:pt-8">
-                <h1 className="mb-6 text-2xl tracking-[0.02em] text-white">Remindr</h1>
+                <h1 className="remindr-wordmark mb-6 text-2xl text-white">Remindr</h1>
 
                 <div className="flex items-center justify-between gap-1 sm:gap-2">
                   {steps.map((step, index) => {

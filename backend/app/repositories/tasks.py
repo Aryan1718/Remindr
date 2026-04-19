@@ -33,6 +33,16 @@ TASK_COLUMNS = """
     completed_at
 """
 
+INTERACTION_EVENT_COLUMNS = """
+    id,
+    user_id,
+    event_type,
+    entity_type,
+    entity_id,
+    payload_json,
+    created_at
+"""
+
 
 class TaskRepository:
     def __init__(self, connection: psycopg.Connection) -> None:
@@ -261,6 +271,31 @@ class TaskRepository:
         except UndefinedTable:
             self.connection.rollback()
             logger.warning("interaction_events table not found; skipped %s event", event_type)
+
+    def list_recent_interaction_events(
+        self,
+        *,
+        user_id: str,
+        since: datetime,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute(
+                    f"""
+                    select {INTERACTION_EVENT_COLUMNS}
+                    from interaction_events
+                    where user_id = %s and created_at >= %s
+                    order by created_at desc
+                    limit %s
+                    """,
+                    (user_id, since, limit),
+                )
+                return list(cursor.fetchall())
+        except UndefinedTable:
+            self.connection.rollback()
+            logger.warning("interaction_events table not found; returning no recent interaction events")
+            return []
 
     def _update_task_record(self, *, task_id: str, user_id: str, values: dict[str, Any]) -> TaskModel | None:
         assignments: list[sql.Composed] = []

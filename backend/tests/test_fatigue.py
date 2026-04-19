@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from datetime import UTC, datetime, timedelta
+from unittest.mock import MagicMock, patch
 
 from pydantic import ValidationError
 
@@ -13,7 +14,7 @@ from app.models.fatigue import (
 )
 from app.schemas.fatigue import FatigueCheckinCreateRequest, FatigueCheckinListFilters, FatiguePatternRecomputeRequest
 from app.services.fatigue_service import FatigueService, bucket_for_datetime
-from app.workers.jobs.fatigue_aggregation import FatigueAggregationWorker
+from app.workers.jobs.fatigue_aggregation import FatigueAggregationWorker, recompute_fatigue_patterns_job
 
 
 class InMemoryFatigueRepository:
@@ -87,6 +88,7 @@ class FatigueServiceTests(unittest.TestCase):
     def test_create_checkin_success(self) -> None:
         repository = InMemoryFatigueRepository()
         service = FatigueService(connection=None, repository=repository)
+        service.enqueue_fatigue_pattern_recompute = MagicMock()
 
         checkin = service.create_checkin(
             user_id="user-1",
@@ -96,6 +98,11 @@ class FatigueServiceTests(unittest.TestCase):
         self.assertEqual(checkin.score, 4)
         self.assertEqual(checkin.user_id, "user-1")
         self.assertEqual(repository.logged_events[0]["event_type"], "fatigue_checkin_submitted")
+        service.enqueue_fatigue_pattern_recompute.assert_called_once_with(
+            user_id="user-1",
+            days_back=90,
+            mode="async",
+        )
 
     def test_invalid_score_rejected(self) -> None:
         with self.assertRaises(ValidationError):
@@ -163,6 +170,7 @@ class FatigueAggregationTests(unittest.TestCase):
         repository = InMemoryFatigueRepository()
         repository.timezones["user-1"] = "UTC"
         service = FatigueService(connection=None, repository=repository)
+        service.enqueue_fatigue_pattern_recompute = MagicMock()
         now = datetime(2026, 4, 20, 15, 0, tzinfo=UTC)
 
         service.create_checkin(
@@ -190,6 +198,59 @@ class FatigueAggregationTests(unittest.TestCase):
         updated = second_run[0]
         self.assertEqual(updated.sample_count, 3)
         self.assertAlmostEqual(updated.avg_fatigue, 3.67, places=2)
+
+    def test_recompute_job_enqueues_memory_distillation_after_patterns_are_upserted(self) -> None:
+        pattern = FatiguePatternModel(
+            id="pattern-1",
+            user_id="user-1",
+            weekday=0,
+            time_bucket=FatigueTimeBucket.MORNING,
+            avg_fatigue=3.5,
+            min_fatigue=3.0,
+            max_fatigue=4.0,
+            fatigue_variance=0.25,
+            sample_count=3,
+            confidence=0.7,
+            trend_direction=FatigueTrendDirection.STABLE,
+            last_signal_at=datetime(2026, 4, 20, 10, 0, tzinfo=UTC),
+            last_computed_at=datetime(2026, 4, 20, 10, 5, tzinfo=UTC),
+            metadata_json={},
+        )
+
+        class FakeConnection:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb) -> None:
+                return None
+
+        class FakeWorker:
+            def __init__(self, repository) -> None:
+                _ = repository
+
+            def recompute_patterns(self, *, user_id: str | None = None, days_back: int = 90):
+                _ = days_back
+                assert user_id == "user-1"
+                return [pattern]
+
+        with (
+            patch("app.workers.jobs.fatigue_aggregation.psycopg.connect", return_value=FakeConnection()),
+            patch("app.workers.jobs.fatigue_aggregation.FatigueAggregationWorker", FakeWorker),
+            patch("app.workers.jobs.fatigue_aggregation.enqueue_memory_distillation") as enqueue_memory_distillation,
+        ):
+            result = recompute_fatigue_patterns_job(
+                database_url="postgresql://example",
+                user_id="user-1",
+                days_back=30,
+            )
+
+        self.assertEqual(result, [pattern])
+        enqueue_memory_distillation.assert_called_once_with(
+            user_id="user-1",
+            days_back=30,
+            trigger_source="fatigue_pattern_recompute",
+            entity_type="fatigue_pattern",
+        )
 
 
 if __name__ == "__main__":

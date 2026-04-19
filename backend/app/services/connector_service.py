@@ -223,7 +223,7 @@ class ConnectorService:
             query["job_status"] = job_status
         if reason:
             query["reason"] = reason
-        return f"{self.settings.resolved_frontend_base_url}/connectors/google-calendar/callback?{parse.urlencode(query)}"
+        return f"{self.settings.resolved_frontend_base_url}/integrations?{parse.urlencode(query)}"
 
     def _state_signing_key(self) -> bytes:
         self._require_google_oauth_settings()
