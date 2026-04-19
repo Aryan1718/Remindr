@@ -2,6 +2,7 @@ export type AppRoute =
   | "/login"
   | "/signup"
   | "/onboarding"
+  | "/channel"
   | "/dashboard"
   | "/tasks"
   | "/goals"
@@ -47,7 +48,7 @@ export interface Goal {
 }
 
 export interface Integration {
-  id: "calendar" | "gmail" | "telegram";
+  id: "calendar" | "gmail" | "outlook" | "telegram";
   provider: string;
   status: "Connected" | "Needs reconnect" | "Not connected";
   lastSync: string;
@@ -105,7 +106,7 @@ export interface OnboardingDraft {
   goalImportance: "Low" | "Medium" | "High";
   goalNotes: string;
   tasks: OnboardingTask[];
-  connectors: ("calendar" | "gmail")[];
+  connectors: ("calendar" | "gmail" | "outlook")[];
   telegramConnected: boolean;
   completed: boolean;
 }
