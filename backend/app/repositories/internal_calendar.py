@@ -247,6 +247,31 @@ class InternalCalendarRepository:
 
         return [InternalCalendarBlockModel.from_record(record) for record in records]
 
+    def list_task_blocks_in_window(
+        self,
+        *,
+        user_id: str,
+        task_id: str,
+        window_start: datetime,
+        window_end: datetime,
+    ) -> list[InternalCalendarBlockModel]:
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                f"""
+                select {INTERNAL_CALENDAR_COLUMNS}
+                from internal_calendar
+                where user_id = %s
+                  and task_id = %s
+                  and starts_at < %s
+                  and ends_at > %s
+                order by starts_at asc, created_at asc
+                """,
+                (user_id, task_id, window_end, window_start),
+            )
+            records = cursor.fetchall()
+
+        return [InternalCalendarBlockModel.from_record(record) for record in records]
+
     def update_block(
         self,
         *,
