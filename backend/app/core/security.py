@@ -2,15 +2,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import lru_cache
+from typing import Any
 
-import httpx
 import jwt
 import psycopg
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jwt import InvalidTokenError, PyJWKClientError
 
 from app.core.config import Settings, get_settings
 from app.core.db import get_db_connection
+from app.models.user import UserModel, UserPreferencesModel
+from app.services.user_service import UserIdentity, UserService
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -22,18 +25,11 @@ class AuthenticatedUser:
     email: str | None = None
 
 
-def _unauthorized(message: str) -> HTTPException:
+def _unauthorized(code: str, message: str) -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail=message,
+        detail={"code": code, "message": message, "details": {}},
         headers={"WWW-Authenticate": "Bearer"},
-    )
-
-
-def _forbidden(message: str) -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail=message,
     )
 
 
@@ -43,11 +39,14 @@ def _get_jwk_client(jwks_url: str) -> jwt.PyJWKClient:
 
 
 def _get_jwks_url(settings: Settings) -> str | None:
-    if settings.supabase_jwks_url:
-        return settings.supabase_jwks_url
-    if settings.supabase_url:
-        return f"{settings.supabase_url.rstrip('/')}/auth/v1/.well-known/jwks.json"
-    return None
+    return settings.resolved_supabase_jwks_url
+
+
+def _decode_options(settings: Settings) -> dict[str, bool]:
+    return {
+        "verify_aud": settings.supabase_jwt_audience is not None,
+        "verify_iss": settings.resolved_supabase_jwt_issuer is not None,
+    }
 
 
 def _decode_token(token: str, settings: Settings) -> dict:
@@ -56,7 +55,9 @@ def _decode_token(token: str, settings: Settings) -> dict:
             token,
             settings.supabase_jwt_secret,
             algorithms=["HS256"],
-            options={"verify_aud": False},
+            audience=settings.supabase_jwt_audience,
+            issuer=settings.resolved_supabase_jwt_issuer,
+            options=_decode_options(settings),
         )
 
     jwks_url = _get_jwks_url(settings)
@@ -68,45 +69,76 @@ def _decode_token(token: str, settings: Settings) -> dict:
         token,
         signing_key.key,
         algorithms=["RS256"],
-        options={"verify_aud": False},
+        audience=settings.supabase_jwt_audience,
+        issuer=settings.resolved_supabase_jwt_issuer,
+        options=_decode_options(settings),
+    )
+
+
+def extract_identity_from_payload(payload: dict[str, Any]) -> UserIdentity:
+    user_metadata = payload.get("user_metadata") or {}
+    full_name = (
+        user_metadata.get("full_name")
+        or user_metadata.get("name")
+        or payload.get("full_name")
+        or payload.get("name")
+    )
+    return UserIdentity(
+        auth_user_id=str(payload["sub"]),
+        email=payload.get("email"),
+        full_name=full_name,
+    )
+
+
+def get_current_token_payload(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+) -> dict[str, Any]:
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        raise _unauthorized("missing_authorization", "Missing bearer token")
+
+    try:
+        claims = _decode_token(credentials.credentials, get_settings())
+    except (InvalidTokenError, PyJWKClientError, RuntimeError) as exc:
+        raise _unauthorized("invalid_token", "Invalid bearer token") from exc
+
+    if not claims.get("sub"):
+        raise _unauthorized("missing_sub", "Token is missing subject claim")
+    return claims
+
+
+def resolve_user_snapshot(
+    *,
+    payload: dict[str, Any],
+    connection: psycopg.Connection,
+    full_name_override: str | None = None,
+    timezone_override: str | None = None,
+) -> tuple[UserModel, UserPreferencesModel]:
+    identity = extract_identity_from_payload(payload)
+    return UserService(connection).get_or_create_user_snapshot(
+        identity,
+        full_name_override=full_name_override,
+        timezone_override=timezone_override,
+    )
+
+
+def get_current_user_snapshot(
+    payload: dict[str, Any] = Depends(get_current_token_payload),
+    connection: psycopg.Connection = Depends(get_db_connection),
+) -> tuple[UserModel, UserPreferencesModel]:
+    return resolve_user_snapshot(
+        payload=payload,
+        connection=connection,
     )
 
 
 def get_current_user(
-    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
-    connection: psycopg.Connection = Depends(get_db_connection),
+    snapshot: tuple[UserModel, UserPreferencesModel] = Depends(get_current_user_snapshot),
 ) -> AuthenticatedUser:
-    if credentials is None or credentials.scheme.lower() != "bearer":
-        raise _unauthorized("Missing bearer token")
-
-    try:
-        claims = _decode_token(credentials.credentials, get_settings())
-    except (jwt.InvalidTokenError, httpx.HTTPError, RuntimeError) as exc:
-        raise _unauthorized("Invalid bearer token") from exc
-
-    auth_user_id = claims.get("sub")
-    if not auth_user_id:
-        raise _unauthorized("Token is missing subject claim")
-
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """
-            select id, auth_user_id, email
-            from users
-            where auth_user_id = %s
-            limit 1
-            """,
-            (auth_user_id,),
-        )
-        user = cursor.fetchone()
-
-    if user is None:
-        raise _forbidden("Authenticated user is not provisioned")
-
+    user, _ = snapshot
     return AuthenticatedUser(
-        user_id=str(user["id"]),
-        auth_user_id=str(user["auth_user_id"]),
-        email=user.get("email"),
+        user_id=user.id,
+        auth_user_id=user.auth_user_id,
+        email=user.email,
     )
 
 
