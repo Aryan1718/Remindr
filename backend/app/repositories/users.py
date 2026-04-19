@@ -91,6 +91,20 @@ class UserRepository:
             record = cursor.fetchone()
         return UserModel.from_record(record) if record else None
 
+    def get_user(self, user_id: str) -> UserModel | None:
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                f"""
+                select {USER_COLUMNS}
+                from users
+                where id = %s
+                limit 1
+                """,
+                (user_id,),
+            )
+            record = cursor.fetchone()
+        return UserModel.from_record(record) if record else None
+
     def create_user(
         self,
         *,
