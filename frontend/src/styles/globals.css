@@ -5,6 +5,8 @@
 html {
   background: var(--color-surface);
   color-scheme: dark;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 body {
@@ -123,6 +125,7 @@ textarea {
 
 .remindr-login-card-entry {
   animation: remindr-login-card-entry 0.8s ease-out;
+  will-change: transform, opacity;
 }
 
 .remindr-blob-a {
@@ -143,4 +146,56 @@ textarea {
 
 .remindr-blob-e {
   animation: remindr-blob-e 19s ease-in-out infinite;
+}
+
+@keyframes remindr-onboarding-step-entry {
+  0% {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes remindr-onboarding-particle {
+  0%, 100% {
+    opacity: 0.3;
+    transform: translate3d(0, 0, 0);
+  }
+
+  50% {
+    opacity: 0.6;
+    transform: translate3d(0, -30px, 0);
+  }
+}
+
+.remindr-onboarding-step-entry {
+  animation: remindr-onboarding-step-entry 0.35s ease-out;
+}
+
+.remindr-onboarding-particle {
+  animation: remindr-onboarding-particle 4s ease-in-out infinite;
+}
+
+.remindr-scroll-shell {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(103, 232, 249, 0.22) transparent;
+}
+
+.remindr-scroll-shell::-webkit-scrollbar {
+  width: 10px;
+}
+
+.remindr-scroll-shell::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.remindr-scroll-shell::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: rgba(103, 232, 249, 0.22);
+  background-clip: padding-box;
 }

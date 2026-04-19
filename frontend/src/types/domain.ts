@@ -1,5 +1,6 @@
 export type AppRoute =
   | "/login"
+  | "/signup"
   | "/onboarding"
   | "/dashboard"
   | "/tasks"
@@ -82,19 +83,41 @@ export interface OnboardingDraft {
   name: string;
   timezone: string;
   role: string;
+  bio: string;
   wakeTime: string;
   sleepTime: string;
+  workStart: string;
+  workEnd: string;
   workHours: string;
   commitments: string;
   focusWindow: string;
+  weekendPattern: string;
   decisionStyle: "Direct recommendation" | "Ranked options";
   reminderTolerance: "Light" | "Balanced" | "High";
   fatigueCheckIn: "Daily" | "Only when needed" | "Manual only";
+  recommendationStyle: "Aggressive" | "Balanced" | "Gentle";
+  reminderStyle: "Gentle" | "Persistent" | "Minimal";
+  notificationFrequency: "High" | "Moderate" | "Low";
+  quietHoursStart: string;
+  quietHoursEnd: string;
   goalTitle: string;
   goalHorizon: string;
   goalImportance: "Low" | "Medium" | "High";
   goalNotes: string;
+  tasks: OnboardingTask[];
   connectors: ("calendar" | "gmail")[];
   telegramConnected: boolean;
   completed: boolean;
+}
+
+export interface OnboardingTask {
+  id: string;
+  title: string;
+  description: string;
+  dueDate: string;
+  effort: string;
+  priority: "low" | "medium" | "high";
+  energyLevel: "low" | "medium" | "high";
+  recurring: boolean;
+  preferredTime: string;
 }

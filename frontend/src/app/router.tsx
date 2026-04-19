@@ -2,7 +2,9 @@ import { Navigate, RouterProvider, createBrowserRouter } from "react-router-dom"
 import { ProtectedRoute, PublicOnlyRoute } from "@/components/auth/AuthGate";
 import { LoginPage } from "@/pages/LoginPage";
 import { NotFoundPage } from "@/pages/NotFoundPage";
+import { OnboardingPage } from "@/pages/OnboardingPage";
 import { RoutePlaceholderPage } from "@/pages/RoutePlaceholderPage";
+import { SignupPage } from "@/pages/SignupPage";
 
 const router = createBrowserRouter([
   {
@@ -16,20 +18,19 @@ const router = createBrowserRouter([
         path: "/login",
         element: <LoginPage />,
       },
+      {
+        path: "/signup",
+        element: <SignupPage />,
+      },
     ],
+  },
+  {
+    path: "/onboarding",
+    element: <OnboardingPage />,
   },
   {
     element: <ProtectedRoute />,
     children: [
-      {
-        path: "/onboarding",
-        element: (
-          <RoutePlaceholderPage
-            description="The onboarding flow is being rebuilt from scratch around your new frontend direction."
-            title="Onboarding"
-          />
-        ),
-      },
       {
         path: "/dashboard",
         element: (
