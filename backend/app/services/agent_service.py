@@ -94,9 +94,11 @@ class AgentService:
             return self._handle_plan_request(user_id=user_id)
         if intent == "decision_query":
             return self._handle_decision_query(user_id=user_id, text=message_text)
+        if intent == "general_chat":
+            return self._handle_general_chat(text=message_text)
         if intent == "help_status":
             return self._handle_help_status()
-        return self._handle_general_chat(user_id=user_id, text=message_text)
+        return self._handle_help_status()
 
     def classify_intent(self, text: str) -> str:
         normalized = text.strip().lower()
@@ -125,8 +127,8 @@ class AgentService:
         ):
             return "decision_query"
         if normalized.endswith("?"):
-            return "decision_query"
-        return "help_status"
+            return "general_chat"
+        return "general_chat"
 
     def parse_callback_data(self, data: str) -> TelegramCallbackAction:
         parts = [part.strip() for part in data.split(":")]
@@ -337,40 +339,30 @@ class AgentService:
             reply_markup=self.build_fatigue_reply_markup(),
         )
 
-    def _handle_general_chat(self, *, user_id: str, text: str) -> TelegramAgentReply:
+    def _handle_general_chat(self, *, text: str) -> TelegramAgentReply:
         if self.llm_client is None:
             return self._handle_help_status()
-
-        service = self._require_service(self.decision_service, "decision")
-        decision = service.query(user_id=user_id, payload=DecisionQueryRequest(query=text))
         result = self.llm_client.generate_text(
             messages=[
                 ChatMessage(
                     role="system",
                     content=(
-                        "You are a Telegram productivity assistant. Keep replies concise, natural, and grounded in the provided backend result. "
-                        "Do not invent tasks, schedule changes, or memory."
+                        "You are a Telegram assistant inside a fatigue-aware productivity app. "
+                        "Answer the user's question directly, naturally, and concisely. "
+                        "Do not claim to change tasks, calendars, or memory unless the user explicitly asked for an app action."
                     ),
                 ),
                 ChatMessage(
                     role="user",
-                    content=(
-                        f"User message: {text}\n"
-                        f"Primary recommendation: {decision.primary_recommendation.title}\n"
-                        f"Recommendation summary: {decision.primary_recommendation.summary}\n"
-                        f"Reasoning summary: {decision.reasoning_summary}"
-                    ),
+                    content=text,
                 ),
             ],
             temperature=0.2,
             max_tokens=180,
         )
         return TelegramAgentReply(
-            text=result.text or f"First: {decision.primary_recommendation.title}. {decision.primary_recommendation.summary}",
-            intent="decision_query",
-            reply_markup=self.build_task_reply_markup(task_id=decision.primary_recommendation.task_id)
-            if decision.primary_recommendation.task_id
-            else None,
+            text=result.text or "I can help with questions, task capture, fatigue logging, and planning.",
+            intent="general_chat",
         )
 
     def _extract_task_title(self, text: str) -> str:
