@@ -7,7 +7,7 @@ import { useSaveOnboardingMutation } from "@/features/onboarding/mutations";
 import { useOnboardingQuery } from "@/features/onboarding/queries";
 import type { Integration } from "@/types/domain";
 
-type ConnectionState = "idle" | "focused" | "connecting" | "success" | "error";
+type ConnectionState = "idle" | "focused" | "connecting" | "pending" | "success" | "error";
 
 interface ParticleSpec {
   id: string;
@@ -51,7 +51,7 @@ function buildTelegramIntegration(
 export function ChannelPage() {
   const navigate = useNavigate();
   const { data: onboardingDraft } = useOnboardingQuery();
-  const { data: integrations = [] } = useIntegrationsQuery();
+  const { data: integrations = [], refetch: refetchIntegrations, isFetching: isRefreshingStatus } = useIntegrationsQuery();
   const saveOnboardingMutation = useSaveOnboardingMutation();
   const saveIntegrationMutation = useSaveIntegrationMutation();
   const connectTelegramMutation = useConnectTelegramBotMutation();
@@ -77,10 +77,14 @@ export function ChannelPage() {
     integrations.find((integration) => integration.id === "telegram") ?? fallbackTelegramIntegration;
 
   useEffect(() => {
-    if (onboardingDraft?.telegramConnected) {
+    if (telegramIntegration.status === "Connected") {
       setConnectionState("success");
+      return;
     }
-  }, [onboardingDraft?.telegramConnected]);
+    if (connectionState === "success") {
+      setConnectionState("idle");
+    }
+  }, [connectionState, telegramIntegration.status]);
 
   useEffect(() => {
     if (connectionState !== "error" || errorMessage !== "Please enter a valid bot token") {
@@ -126,7 +130,9 @@ export function ChannelPage() {
     setConnectionState("connecting");
 
     try {
-      const connection = await connectTelegramMutation.mutateAsync({ botToken: botToken.trim() });
+      const connection = await connectTelegramMutation.mutateAsync({
+        botToken: botToken.trim(),
+      });
       if (!connection) {
         throw new Error("Unable to connect Telegram");
       }
@@ -140,16 +146,7 @@ export function ChannelPage() {
         }),
       );
 
-      if (onboardingDraft) {
-        await saveOnboardingMutation.mutateAsync({
-          ...onboardingDraft,
-          stage: "channel",
-          telegramConnected: true,
-          completed: false,
-        });
-      }
-
-      setConnectionState("success");
+      setConnectionState(connection.telegram_chat_id !== null ? "success" : "pending");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Unable to connect Telegram");
       setConnectionState("error");
@@ -254,6 +251,38 @@ export function ChannelPage() {
                     {isFinishing ? "Opening dashboard..." : "Continue to Dashboard"}
                   </button>
                 </div>
+              ) : connectionState === "pending" ? (
+                <div className="text-center">
+                  <div className="mb-6 inline-flex h-20 w-20 items-center justify-center rounded-full border-2 border-cyan-400/40 bg-cyan-500/15">
+                    <Send className="h-10 w-10 text-cyan-300" />
+                  </div>
+                  <h2 className="text-2xl text-white sm:text-3xl">Confirm In Telegram</h2>
+                  <p className="mb-4 mt-4 text-sm leading-7 text-cyan-200/70 sm:text-base">
+                    The bot token looks valid. Open your bot in Telegram, send <span className="font-medium text-cyan-100">/start</span>,
+                    then tap <span className="font-medium text-cyan-100">Yes</span>. It will only connect after that confirmation.
+                  </p>
+                  <p className="mb-8 text-xs text-cyan-300/55">
+                    After you confirm inside Telegram, refresh the status here.
+                  </p>
+                  <div className="flex flex-col gap-3">
+                    <button
+                      className="rounded-xl bg-gradient-to-r from-cyan-600 to-cyan-500 px-8 py-4 text-white transition-all duration-300 hover:from-cyan-500 hover:to-cyan-400 hover:shadow-[0_18px_44px_rgba(34,211,238,0.22)] disabled:cursor-wait disabled:opacity-60"
+                      disabled={isRefreshingStatus}
+                      onClick={() => void refetchIntegrations()}
+                      type="button"
+                    >
+                      {isRefreshingStatus ? "Refreshing..." : "I confirmed in Telegram"}
+                    </button>
+                    <button
+                      className="px-6 py-3 text-cyan-300/70 transition-colors hover:text-cyan-200 disabled:cursor-wait disabled:opacity-50"
+                      disabled={isFinishing}
+                      onClick={() => void finalizeChannelStep(false)}
+                      type="button"
+                    >
+                      {isFinishing ? "Opening dashboard..." : "Skip for now"}
+                    </button>
+                  </div>
+                </div>
               ) : (
                 <div>
                   <div className="mb-10 text-center">
@@ -313,6 +342,7 @@ export function ChannelPage() {
                       </div>
                       <p className="mt-2 text-xs text-cyan-300/50">
                         Paste your Telegram bot token to link the conversation channel.
+                        Remindr will use the backend's configured Telegram webhook URL automatically.
                       </p>
                     </div>
 

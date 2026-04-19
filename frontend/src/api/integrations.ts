@@ -1,5 +1,7 @@
+import { readStoredSession } from "@/api/auth";
 import { requestJson, simulateRequest } from "@/api/client";
 import { getDb, updateDb } from "@/mocks/db";
+import { useAuthStore } from "@/stores/authStore";
 import type { Integration } from "@/types/domain";
 
 interface TelegramConnectionResponse {
@@ -201,9 +203,17 @@ export function saveIntegration(integration: Integration) {
 }
 
 export async function connectTelegramBot({ botToken, webhookBaseUrl }: TelegramConnectPayload) {
+  const accessToken = useAuthStore.getState().accessToken ?? readStoredSession()?.accessToken ?? null;
+  if (!accessToken) {
+    throw new Error("You need to log in again before connecting Telegram.");
+  }
+
   await getCurrentUserId();
   const response = await requestJson<TelegramConnectionResponse>("/telegram/bots/connect", {
     method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
     body: JSON.stringify({
       bot_token: botToken,
       webhook_base_url: webhookBaseUrl || undefined,
