@@ -1,4 +1,5 @@
 export type AppRoute =
+  | "/login"
   | "/onboarding"
   | "/dashboard"
   | "/tasks"

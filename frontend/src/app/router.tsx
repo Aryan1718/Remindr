@@ -1,60 +1,109 @@
-import { Navigate, Outlet, RouterProvider, createBrowserRouter } from "react-router-dom";
-import { AppLayout } from "@/components/layout/AppLayout";
-import { ConnectorCallbackPage } from "@/pages/ConnectorCallbackPage";
-import { DashboardPage } from "@/pages/DashboardPage";
-import { GoalDetailPage } from "@/pages/GoalDetailPage";
-import { GoalsPage } from "@/pages/GoalsPage";
-import { IntegrationsPage } from "@/pages/IntegrationsPage";
-import { LandingPage } from "@/pages/LandingPage";
+import { Navigate, RouterProvider, createBrowserRouter } from "react-router-dom";
+import { LoginPage } from "@/pages/LoginPage";
 import { NotFoundPage } from "@/pages/NotFoundPage";
-import { SettingsPage } from "@/pages/SettingsPage";
-import { SetupFlowPage } from "@/pages/SetupFlowPage";
-import { TaskDetailPage } from "@/pages/TaskDetailPage";
-import { TasksPage } from "@/pages/TasksPage";
-import { useOnboardingQuery } from "@/features/onboarding/queries";
-
-function Shell() {
-  return (
-    <AppLayout>
-      <Outlet />
-    </AppLayout>
-  );
-}
-
-function ProtectedShell() {
-  const { data } = useOnboardingQuery();
-
-  if (!data) return null;
-  if (!data.completed) {
-    return <Navigate replace to="/start" />;
-  }
-
-  return <Shell />;
-}
+import { RoutePlaceholderPage } from "@/pages/RoutePlaceholderPage";
 
 const router = createBrowserRouter([
   {
     path: "/",
-    element: <LandingPage />,
+    element: <Navigate replace to="/login" />,
+  },
+  {
+    path: "/login",
+    element: <LoginPage />,
+  },
+  {
+    path: "/onboarding",
+    element: (
+      <RoutePlaceholderPage
+        description="The onboarding flow is being rebuilt from scratch around your new frontend direction."
+        title="Onboarding"
+      />
+    ),
+  },
+  {
+    path: "/dashboard",
+    element: (
+      <RoutePlaceholderPage
+        description="The dashboard has been cleared so the next redesign can replace it cleanly."
+        title="Dashboard"
+      />
+    ),
+  },
+  {
+    path: "/tasks",
+    element: (
+      <RoutePlaceholderPage
+        description="The task management UI is waiting for the new screen set."
+        title="Tasks"
+      />
+    ),
+  },
+  {
+    path: "/tasks/:taskId",
+    element: (
+      <RoutePlaceholderPage
+        description="The task detail view has been removed until the new frontend is dropped in."
+        title="Task detail"
+      />
+    ),
+  },
+  {
+    path: "/goals",
+    element: (
+      <RoutePlaceholderPage
+        description="The goals surface has been cleared for the redesign pass."
+        title="Goals"
+      />
+    ),
+  },
+  {
+    path: "/goals/:goalId",
+    element: (
+      <RoutePlaceholderPage
+        description="The goal detail view will be rebuilt once you send the new design."
+        title="Goal detail"
+      />
+    ),
+  },
+  {
+    path: "/integrations",
+    element: (
+      <RoutePlaceholderPage
+        description="The integrations screen is temporarily replaced with a clean placeholder."
+        title="Integrations"
+      />
+    ),
+  },
+  {
+    path: "/settings",
+    element: (
+      <RoutePlaceholderPage
+        description="Settings is now out of the live surface until the new version is ready."
+        title="Settings"
+      />
+    ),
+  },
+  {
+    path: "/connectors/:provider/callback",
+    element: (
+      <RoutePlaceholderPage
+        description="Connector callback handling will be rebuilt after the core screens are replaced."
+        title="Connector callback"
+      />
+    ),
+  },
+  {
+    path: "/welcome",
+    element: <Navigate replace to="/login" />,
   },
   {
     path: "/start",
-    element: <SetupFlowPage />,
+    element: <Navigate replace to="/onboarding" />,
   },
   {
-    path: "/",
-    element: <ProtectedShell />,
-    children: [
-      { path: "dashboard", element: <DashboardPage /> },
-      { path: "tasks", element: <TasksPage /> },
-      { path: "tasks/:taskId", element: <TaskDetailPage /> },
-      { path: "goals", element: <GoalsPage /> },
-      { path: "goals/:goalId", element: <GoalDetailPage /> },
-      { path: "integrations", element: <IntegrationsPage /> },
-      { path: "settings", element: <SettingsPage /> },
-      { path: "connectors/:provider/callback", element: <ConnectorCallbackPage /> },
-      { path: "*", element: <NotFoundPage /> },
-    ],
+    path: "*",
+    element: <NotFoundPage />,
   },
 ]);
 
