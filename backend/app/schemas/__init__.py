@@ -21,6 +21,7 @@ from app.schemas.internal_calendar import (
     InternalCalendarSuggestEnvelope,
     InternalCalendarSuggestRequest,
 )
+from app.schemas.user import PreferencesResponse, UserResponse, UserSnapshotResponse
 
 __all__ = [
     "CalendarFeedbackRead",
@@ -42,4 +43,7 @@ __all__ = [
     "TaskListEnvelope",
     "TaskRead",
     "TaskUpdateRequest",
+    "PreferencesResponse",
+    "UserResponse",
+    "UserSnapshotResponse",
 ]
