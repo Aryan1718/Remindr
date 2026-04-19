@@ -18,6 +18,11 @@ def format_task_created(task: TaskRead) -> str:
     return _clip_lines(lines, limit=3)
 
 
+def format_task_created_with_next_action(task: TaskRead, response: DecisionResponse) -> str:
+    lines = [format_task_created(task), "", format_next_action(response)]
+    return _clip_lines(lines, limit=6)
+
+
 def format_task_list(tasks: list[TaskRead]) -> str:
     if not tasks:
         return "No open tasks.\nCreate one so I can help prioritize it."
