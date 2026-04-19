@@ -111,6 +111,50 @@ class TaskRepository:
 
         return [TaskModel.from_record(record) for record in records]
 
+    def list_schedulable_tasks(
+        self,
+        *,
+        user_id: str,
+        task_ids: list[str] | None = None,
+        limit: int = 100,
+    ) -> list[TaskModel]:
+        clauses: list[sql.Composed] = [
+            sql.SQL("user_id = %s"),
+            sql.SQL("status = any(%s)"),
+        ]
+        params: list[Any] = [
+            user_id,
+            [
+                TaskStatus.PENDING.value,
+                TaskStatus.SCHEDULED.value,
+                TaskStatus.IN_PROGRESS.value,
+            ],
+        ]
+
+        if task_ids:
+            clauses.append(sql.SQL("id = any(%s)"))
+            params.append(task_ids)
+
+        query = sql.SQL(
+            """
+            select {columns}
+            from tasks
+            where {where_clause}
+            order by coalesce(due_at, 'infinity'::timestamptz), priority desc, created_at asc
+            limit %s
+            """
+        ).format(
+            columns=sql.SQL(TASK_COLUMNS),
+            where_clause=sql.SQL(" and ").join(clauses),
+        )
+        params.append(limit)
+
+        with self.connection.cursor() as cursor:
+            cursor.execute(query, params)
+            records = cursor.fetchall()
+
+        return [TaskModel.from_record(record) for record in records]
+
     def get_task(self, task_id: str, user_id: str) -> TaskModel | None:
         with self.connection.cursor() as cursor:
             cursor.execute(
