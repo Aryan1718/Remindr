@@ -1,28 +1,28 @@
 # HumanDelta Integration Context
 *Fatigue-Aware Personal Assistant*
 
-Last updated: April 18, 2026
+Last updated: April 19, 2026
 
 ## 1. Purpose
 
-This document defines how HumanDelta should be integrated into the Fatigue-Aware Personal Assistant.
+This document defines how HumanDelta should be integrated into the Fatigue-Aware Personal Assistant based on the currently available HumanDelta API.
 
-The goal is to use HumanDelta as a **quality and validation layer** around the system, not as the main reasoning engine and not as the database.
+The goal is to use HumanDelta as a **managed knowledge ingestion and retrieval layer** for external websites and uploaded documents.
 
-HumanDelta should help improve:
+HumanDelta should help the system:
 
-- connector-derived signal quality
-- reliability of learned memory
-- long-term decision improvement
-- trust in what the system stores and uses
+- index external knowledge sources without running our own retrieval infra
+- upload user-relevant documents into one searchable knowledge pool
+- retrieve semantically relevant context when the assistant needs supporting information
+- keep knowledge retrieval separate from product state, scheduling, and fatigue logic
 
 This integration must respect the current architecture:
 
-- Supabase remains the source of truth
+- Supabase remains the source of truth for product data
 - backend services remain the operational owner
 - internal calendar remains the assistant-owned planning layer
 - fatigue layer remains the system's bandwidth estimation layer
-- HumanDelta remains a validation and evaluation layer
+- HumanDelta remains a retrieval layer, not a planner or database replacement
 
 ---
 
@@ -35,23 +35,69 @@ We are **not** using HumanDelta:
 - as the scheduler
 - as the fatigue estimator
 - as the real-time decision engine
+- as the final authority for task creation or memory writes
 
 We **are** using HumanDelta:
 
-- after connector normalization
-- before certain important records are persisted
-- after memory candidates are generated
-- after decisions are made, for async evaluation
+- to crawl relevant websites into a managed index
+- to upload markdown, PDF, CSV, image, and text documents into a searchable library
+- to run semantic search across indexed websites and uploaded documents
+- to expose file-style inspection tools over indexed knowledge when helpful
 
 ### One-line definition
 
-> HumanDelta is a trust and knowledge-quality layer that helps the system decide whether connector signals, memory candidates, and past decisions are good enough to use.
+> HumanDelta is the system's managed external knowledge and document retrieval layer.
 
 ---
 
-## 3. Relationship with Existing Architecture
+## 3. Verified HumanDelta API Surface
 
-## 3.1 What stays the same
+The current HumanDelta API capabilities available to this project are:
+
+- `POST /v1/indexes`
+  - create and start a website crawl job
+- `GET /v1/indexes`
+  - list index jobs
+- `GET /v1/indexes/{id}`
+  - poll index job status and stage progress
+- `POST /v1/indexes/{id}/cancel`
+  - cancel a running crawl job
+- `POST /v1/search`
+  - semantic vector search across indexed web content and uploaded documents
+- `POST /v1/documents`
+  - upload files into the org document library
+- `GET /v1/documents`
+  - list uploaded documents
+- `GET /v1/documents/{id}/preview`
+  - retrieve extracted text for a document
+- `DELETE /v1/documents/{id}`
+  - delete an uploaded document
+- `POST /v1/fs`
+  - shell-style inspection of indexed knowledge base contents
+
+### Important interpretation
+
+This API provides:
+
+- ingestion
+- indexing
+- semantic retrieval
+- content inspection
+
+This API does **not** by itself provide:
+
+- accept/reject validation judgments
+- decision scoring
+- memory approval logic
+- scheduling recommendations
+
+So HumanDelta should be integrated as retrieval infrastructure, not as a trust-evaluator engine.
+
+---
+
+## 4. Relationship with Existing Architecture
+
+## 4.1 What stays the same
 
 ### Supabase
 Supabase remains the main system of record for:
@@ -73,269 +119,240 @@ The backend remains responsible for:
 - APIs
 - orchestration
 - scheduling
-- memory distillation
+- connector sync
 - fatigue estimation
-- worker execution
+- task creation
+- watcher execution
 - notification delivery
+- deciding what becomes product state
 
 ### Internal Calendar
-The internal calendar remains the assistant-owned operational planning layer.
+The internal calendar remains the assistant-owned planning layer.
 
 ### Fatigue Layer
-The fatigue layer remains the main structured estimator of user bandwidth.
+The fatigue layer remains the structured estimator of user bandwidth.
 
 ---
 
-## 3.2 What HumanDelta adds
+## 4.2 What HumanDelta adds
 
 HumanDelta adds a new supporting layer:
 
-- validates connector-derived signals
-- validates memory candidates before durable storage
-- evaluates decision quality after user outcomes are observed
-- helps reduce low-quality or premature learned behavior
+- crawled website knowledge
+- uploaded document knowledge
+- semantic retrieval over both in one embedding space
+- content preview and inspection tools for debugging and prompt construction
 
 ---
 
-## 4. High-Level Placement
+## 5. High-Level Placement
 
-## 4.1 Connector path
+## 5.1 Website knowledge path
 
 ```text
-Connectors -> Normalize -> HumanDelta validation -> Product signals -> Supabase
+User intent or watcher need -> choose website source -> HumanDelta crawl job -> poll until completed -> searchable web knowledge
 ```
 
-## 4.2 Memory path
+## 5.2 Document knowledge path
 
 ```text
-Interaction events + feedback -> Memory candidate generation -> HumanDelta validation -> learned_memories
+Connector output or user upload -> transform into document if needed -> upload to HumanDelta -> searchable document knowledge
 ```
 
-## 4.3 Decision feedback path
+## 5.3 Retrieval path
 
 ```text
-Decision created -> User outcome observed -> HumanDelta evaluation -> Improvement signals stored
+Assistant workflow -> semantic search -> retrieved context -> backend interprets context -> product action or response
 ```
 
 ---
 
-## 5. Main Integration Areas
+## 6. Main Integration Areas
 
-## 5.1 Connector Validation Layer
+## 6.1 Job Search Knowledge
 
-This is the most important place to use HumanDelta first.
+This is the best first use case.
 
 ### Why
-Raw connector data is noisy.
-Even normalized connector data may still contain weak, ambiguous, or non-actionable information.
 
-Examples:
-- an email that sounds important but has no real obligation
-- a calendar event that should not become a planning constraint
-- a message that should not become a task
+The project already includes the idea of a job search watcher, and HumanDelta can support that without changing core planning ownership.
 
-### What HumanDelta should do here
-After Gmail or Google Calendar data is normalized, HumanDelta should help answer:
+### Proposed flow
 
-- is this signal actionable?
-- is this signal strong enough to create a task?
-- is this signal only background context?
-- is this signal too weak or ambiguous to persist into core product state?
+1. user indicates they are searching for jobs
+2. intent matcher identifies job-search mode
+3. system asks for target roles
+4. backend uses the target roles to collect job-related source material
+5. source material is assembled into a document or indexed source set
+6. HumanDelta stores that knowledge
+7. search retrieves relevant job context later for watcher logic, summaries, or recommendations
 
 ### Example
-Normalized email candidate:
 
-```json
-{
-  "type": "email_obligation_candidate",
-  "subject": "Reminder",
-  "snippet": "Let's catch up sometime next week.",
-  "due_at": null
-}
-```
+If the user targets:
 
-Possible HumanDelta output:
+- product manager
+- data analyst
+- machine learning engineer
 
-```json
-{
-  "is_actionable": false,
-  "confidence": 0.32,
-  "reason": "No clear action, no deadline, no explicit obligation"
-}
-```
+Then the system can:
+
+- collect role-relevant job data from approved sources
+- package it into a structured markdown or text document
+- upload it to HumanDelta
+- search that knowledge base later for matching opportunities, repeated requirements, location trends, or preparation guidance
 
 ### Product effect
-Only validated signals should become:
 
-- tasks
-- high-priority reminders
-- internal calendar suggestion inputs
-- memory evidence candidates
+HumanDelta helps the assistant:
 
-### Important rule
-HumanDelta should not directly write to the database.
-The backend service layer still decides what gets stored.
+- search across collected job market context
+- summarize role patterns
+- support future job-related watcher outputs
+
+The backend still decides:
+
+- whether to create tasks
+- whether to notify the user
+- whether to update goals or watchers
 
 ---
 
-## 5.2 Memory Validation Layer
+## 6.2 Gmail-Derived Document Library
 
-This is the second most important place to use HumanDelta.
+This is the second strong use case once Gmail connector flow exists.
 
 ### Why
-Learned memory is powerful but risky.
-If weak patterns are stored too early, the assistant starts learning the wrong things.
 
-Examples of risky memory:
-- "User hates working at night" after only one rejection
-- "User prefers direct answers" after one short reply
-- "User is always overloaded on Wednesdays" from sparse evidence
+The project already wants Gmail as a context source, but raw emails should not directly become product state.
 
-### What HumanDelta should do here
-Before a memory candidate becomes a durable learned memory, HumanDelta should help answer:
+### Proposed flow
 
-- is there enough evidence?
-- is the evidence consistent?
-- is the pattern recent enough?
-- is the pattern too broad or too weak?
-- is the evidence conflicting?
+1. Gmail connector syncs and normalizes messages
+2. relevant email content is converted into markdown documents
+3. markdown is uploaded to HumanDelta
+4. HumanDelta indexes the uploaded documents
+5. semantic search later retrieves useful evidence from the user's email-derived knowledge base
 
-### Example
-Candidate memory:
+### Example document types
 
-```json
-{
-  "statement": "User prefers morning work",
-  "evidence_count": 2,
-  "domains": ["task", "calendar"],
-  "source": "behavior"
-}
-```
-
-Possible HumanDelta output:
-
-```json
-{
-  "status": "reject",
-  "confidence": 0.41,
-  "reason": "Insufficient repeated evidence"
-}
-```
+- email obligation digest
+- deadline digest
+- recruiter conversation summary
+- project communication digest
+- weekly inbox summary
 
 ### Product effect
-Only validated memory candidates should be written into `learned_memories`.
 
-This improves:
-- personalization quality
-- fatigue-aware recommendations
-- trust in behavioral learning
+HumanDelta helps retrieve:
+
+- likely obligations
+- supporting context for a task
+- repeated themes across email history
+- relevant snippets for future assistant workflows
+
+The backend still decides:
+
+- whether something should become a task
+- whether something should become a reminder
+- whether something should enter learned memory
 
 ---
 
-## 5.3 Decision Evaluation Layer
+## 6.3 User Uploads and Personal Knowledge
 
-This is a useful later-stage integration.
+Users may also upload their own documents.
 
-### Why
-After a recommendation is made, the system can learn from what happened next.
+### Examples
 
-Examples:
-- user accepted suggestion
-- user rejected suggestion
-- user ignored suggestion
-- task was completed successfully
-- task was delayed again
-
-HumanDelta can evaluate whether the original decision was likely good or poor.
-
-### What HumanDelta should do here
-It should help answer:
-
-- was the recommendation aligned with available evidence?
-- was the recommendation too aggressive?
-- was the suggestion inconsistent with fatigue or recent behavior?
-- should a negative outcome become a learning signal?
-
-### Example
-Original decision:
-- "Do a 2-hour deep work block at 10 PM"
-
-Observed outcome:
-- user rejected
-- fatigue score = 4
-- similar late-night blocks rejected before
-
-Possible HumanDelta output:
-
-```json
-{
-  "decision_quality": "poor",
-  "confidence": 0.84,
-  "reason": "Recommendation conflicts with repeated late-night rejection pattern"
-}
-```
+- resume
+- syllabus
+- assignment PDF
+- project brief
+- planning notes
+- onboarding docs
+- policy docs
+- CSV exports
 
 ### Product effect
-This evaluation can be stored and later used for:
-- decision engine tuning
-- scheduling improvements
-- memory distillation support
-- trust analytics
+
+These documents can later support:
+
+- goal planning
+- job search assistance
+- assignment guidance
+- summarization
+- contextual decision support
+
+This is a strong fit for HumanDelta because it turns scattered user materials into one searchable corpus without building our own embedding pipeline first.
 
 ---
 
-## 6. Where HumanDelta Should NOT Be Used
+## 7. Where HumanDelta Should NOT Be Used
 
-## 6.1 Not in real-time user response path
+## 7.1 Not as a database replacement
 
-Do not call HumanDelta directly inside:
+HumanDelta is not the system of record.
 
-- `/decision/query`
-- Telegram message reply generation
-- fatigue estimation request path
-- immediate internal calendar scoring path
-
-### Why
-These flows must stay:
-- fast
-- deterministic enough to debug
-- resilient to external dependency failure
-
-HumanDelta should remain async wherever possible.
-
----
-
-## 6.2 Not as database replacement
-
-HumanDelta is not a database.
-It should not replace Supabase or pgvector.
+It should not replace Supabase or pgvector-backed product storage.
 
 Supabase remains responsible for:
+
 - persistence
-- querying
-- structured product state
-- vector memory storage
+- relational querying
+- product state
+- audit trails
+- scheduling state
+- fatigue records
 
 ---
 
-## 6.3 Not as scheduler replacement
+## 7.2 Not as a scheduler replacement
 
 HumanDelta should not decide:
-- which block gets scheduled where
-- how the internal calendar resolves conflicts
+
+- which task block gets scheduled where
+- how internal calendar conflicts are resolved
 - how fatigue scores are computed
+- how recommendation ranking works
 
 Those remain inside:
-- scheduling workers
+
 - internal calendar service
-- fatigue layer
 - decision service
+- fatigue service
+- watcher logic
 
 ---
 
-## 7. Recommended Integration Model
+## 7.3 Not directly in the real-time critical path unless retrieval is optional
 
-## 7.1 HumanDelta as an internal service dependency
+Do not make HumanDelta a hard dependency for:
+
+- `/decision/query`
+- Telegram reply generation
+- fatigue estimation
+- immediate scheduling
+
+### Why
+
+These flows should remain:
+
+- fast
+- debuggable
+- resilient to provider outages
+
+HumanDelta retrieval should be:
+
+- optional
+- timeout-bounded
+- additive, not blocking
+
+---
+
+## 8. Recommended Integration Model
+
+## 8.1 HumanDelta as an internal retrieval service dependency
 
 Create a dedicated service layer:
 
@@ -353,26 +370,39 @@ backend/
 
 #### `humandelta_client.py`
 Responsible for:
+
 - outbound API calls to HumanDelta
-- authentication and request handling
-- timeout and retry-safe request patterns
+- authentication
+- polling index jobs
+- multipart document uploads
+- search requests
+- fs requests
+- timeout and retry-safe request handling
 
 #### `humandelta_mapper.py`
 Responsible for:
-- mapping internal objects into HumanDelta request payloads
-- mapping HumanDelta responses into internal validation shapes
+
+- mapping internal data into HumanDelta upload/search/index payloads
+- converting Gmail or other internal content into markdown-friendly upload shapes
+- mapping HumanDelta responses into internal retrieval shapes
 
 #### `humandelta_service.py`
 Responsible for:
+
 - deciding when HumanDelta should be called
-- exposing helper methods for connector validation, memory validation, and decision evaluation
+- exposing helper methods for:
+  - website indexing
+  - document upload
+  - semantic search
+  - document preview
+  - knowledge inspection
 - shielding the rest of the backend from provider-specific details
 
 ---
 
-## 7.2 Worker-first execution
+## 8.2 Worker-first execution
 
-HumanDelta should mainly be used through workers, not directly from routes.
+HumanDelta should mainly be used through workers for ingestion tasks.
 
 Recommended worker additions:
 
@@ -381,269 +411,289 @@ backend/
   app/
     workers/
       jobs/
-        humandelta_connector_validation.py
-        humandelta_memory_validation.py
-        humandelta_decision_evaluation.py
+        humandelta_index_website.py
+        humandelta_upload_document.py
 ```
 
 ### Why workers
+
 This keeps:
+
 - API latency low
-- error handling cleaner
+- crawl polling off the request path
 - retries safer
-- integration optional and non-blocking
+- ingestion optional and non-blocking
+
+Search can still be called synchronously in bounded, low-latency contexts if needed, but indexing and large uploads should prefer workers.
 
 ---
 
-## 8. Detailed Flow Design
+## 9. Detailed Flow Design
 
-## 8.1 Connector validation flow
+## 9.1 Website indexing flow
 
 ### Step-by-step
-1. connector sync job fetches provider data
-2. normalization job converts provider payloads into internal shapes
-3. backend produces candidate signals
-4. HumanDelta validation job checks candidate quality
-5. accepted signals are passed to service layer
-6. service layer writes final product records into Supabase
 
-### Candidate examples
-- email_obligation_candidate
-- email_deadline_candidate
-- calendar_constraint_candidate
-- calendar_busy_window_candidate
+1. backend chooses a website to index
+2. backend creates a HumanDelta index job
+3. worker polls `GET /v1/indexes/{id}`
+4. when status becomes `completed`, the index is available for search
+5. backend stores local metadata about that source if needed
+6. future workflows run semantic search against that index
 
-### Final records that may be created
-- `tasks`
-- internal calendar planning inputs
-- `notifications`
-- `interaction_events`
+### Example sources
 
-### Important rule
-HumanDelta should influence whether the signal is trusted, but the backend still owns final write decisions.
+- job boards
+- documentation sites
+- university portals
+- company career pages
 
 ---
 
-## 8.2 Memory validation flow
+## 9.2 Document upload flow
 
 ### Step-by-step
-1. interaction events and feedback accumulate
-2. memory distillation job creates candidate memory
-3. HumanDelta validation job checks pattern quality
-4. accepted memory is persisted into `learned_memories`
-5. rejected memory is dropped or stored as weak evidence only
 
-### Candidate examples
-- user rejects long evening work blocks
-- user prefers decisive recommendations when tired
-- user accepts short review blocks on weekdays
+1. backend receives or generates a document
+2. if needed, internal content is converted into markdown or text
+3. backend uploads file to `POST /v1/documents`
+4. HumanDelta extracts, chunks, and embeds content
+5. document becomes searchable through `POST /v1/search`
 
-### Persistence rule
-Only validated, high-confidence memory should enter `learned_memories`.
+### Example documents
+
+- Gmail-derived markdown summaries
+- resume
+- syllabus
+- assignment brief
+- notes
+- role research digest
 
 ---
 
-## 8.3 Decision evaluation flow
+## 9.3 Retrieval flow
 
 ### Step-by-step
-1. decision engine returns recommendation
-2. system stores decision event
-3. user behavior produces outcome signal
-4. evaluation job packages original decision + outcome
-5. HumanDelta evaluates quality
-6. evaluation record is stored
-7. future learning jobs use this evidence
 
-### Outcome examples
-- accepted and completed
-- rejected with fatigue reason
-- ignored
-- rescheduled
-- failed follow-through
+1. workflow needs background context
+2. backend formulates a natural-language query
+3. backend calls `POST /v1/search`
+4. HumanDelta returns ranked chunks with source context
+5. backend uses those results for summaries, watcher reasoning, or assistant support
 
----
+### Example retrieval use cases
 
-## 9. Suggested Database Support
-
-HumanDelta does not replace existing tables.
-But we should add one support table to keep evaluation output structured.
-
-## 9.1 Recommended table: `humandelta_evaluations`
-
-```sql
-create table humandelta_evaluations (
-  id uuid primary key default gen_random_uuid(),
-  user_id uuid not null references users(id) on delete cascade,
-  evaluation_type text not null,
-  reference_type text not null,
-  reference_id uuid,
-  status text not null,
-  confidence numeric(4,3) not null default 0.500,
-  reason text,
-  metadata_json jsonb not null default '{}'::jsonb,
-  created_at timestamptz not null default now()
-);
-```
-
-### Purpose
-Store HumanDelta results for:
-- connector validation
-- memory validation
-- decision evaluation
-
-### Example values
-
-#### Connector validation
-- `evaluation_type = 'connector_validation'`
-- `reference_type = 'email_candidate'`
-
-#### Memory validation
-- `evaluation_type = 'memory_validation'`
-- `reference_type = 'memory_candidate'`
-
-#### Decision evaluation
-- `evaluation_type = 'decision_evaluation'`
-- `reference_type = 'decision_request'`
+- "Find software engineer roles mentioning Python and remote work"
+- "What did the user's uploaded resume emphasize?"
+- "What deadlines appear in the uploaded course documents?"
+- "Find recruiter replies mentioning interview scheduling"
 
 ---
 
-## 10. Relationship to Existing Tables
+## 10. Suggested Local Metadata Support
 
-## 10.1 `connectors`
-No change in core ownership.
+HumanDelta does not replace product tables, but we may eventually want local metadata tables to track what we uploaded or indexed.
+
+Examples of useful future metadata:
+
+- indexed source registry
+- uploaded document registry
+- sync status for generated markdown uploads
+- document-to-user mapping for uploaded artifacts
+
+These local tables are optional for the first implementation if HumanDelta IDs can be stored inside existing metadata fields, but they may become useful later.
+
+---
+
+## 11. Relationship to Existing Tables
+
+## 11.1 `connectors`
+
 Connector account metadata remains here.
 
-## 10.2 External normalized connector tables
-HumanDelta should validate normalized records before they produce product actions.
-
-Recommended relevant tables:
-- `external_calendar_events`
-- `external_email_items`
-
-### Role
-HumanDelta helps classify whether normalized external rows should become stronger product signals.
-
-## 10.3 `tasks`
-HumanDelta may influence whether a candidate becomes a task.
-It does not own task writes.
-
-## 10.4 `internal_calendar`
-HumanDelta should not own scheduling logic.
-But validated connector signals may influence scheduling inputs.
-
-## 10.5 `learned_memories`
-HumanDelta is very useful before new memory is written here.
-
-## 10.6 `interaction_events`
-This remains a major source for:
-- memory candidate generation
-- decision evaluation evidence
-
-## 10.7 `fatigue_checkins` and `fatigue_patterns`
-These remain owned by the fatigue layer.
-HumanDelta should not replace fatigue estimation.
+HumanDelta should not replace connector ownership.
 
 ---
 
-## 11. Recommended Usage Rules
+## 11.2 `external_calendar_events`
+
+Calendar records remain normalized external truth.
+
+HumanDelta may later store supporting documents derived from other sources, but calendar sync itself does not require HumanDelta.
+
+---
+
+## 11.3 `external_email_items`
+
+This is the strongest future source for HumanDelta document generation.
+
+Email records can later be transformed into markdown documents and uploaded to HumanDelta.
+
+---
+
+## 11.4 `tasks`
+
+Tasks remain assistant-owned operational state.
+
+HumanDelta may provide supporting retrieval context, but does not own task creation.
+
+---
+
+## 11.5 `internal_calendar`
+
+Internal calendar remains assistant-owned planning state.
+
+HumanDelta may provide supporting context for planning-oriented workflows, but does not own scheduling.
+
+---
+
+## 11.6 `learned_memories`
+
+Learned memory remains owned by our database and backend logic.
+
+HumanDelta may provide supporting retrieved evidence, but is not the memory store itself.
+
+---
+
+## 11.7 `interaction_events`
+
+This remains a useful source for future document generation or summarization jobs.
+
+But interaction events should not be bulk-pushed into HumanDelta without a clear use case.
+
+---
+
+## 12. Recommended Usage Rules
 
 ## Rule 1
-Use HumanDelta only for **high-value validation points**, not for every minor event.
+
+Use HumanDelta for **external knowledge and uploaded document retrieval**, not for core operational truth.
 
 ## Rule 2
-Keep HumanDelta **off the critical request path**.
+
+Prefer HumanDelta for workflows where retrieval quality matters more than strict determinism.
 
 ## Rule 3
-Treat HumanDelta as **advisory validation**, not the final source of truth.
+
+Keep HumanDelta off critical planning and fatigue paths unless retrieval is optional and timeout-bounded.
 
 ## Rule 4
-Persist HumanDelta outcomes in your own database for auditability.
+
+Do not let HumanDelta directly mutate tasks, scheduling, fatigue, or durable product state.
 
 ## Rule 5
-Do not let HumanDelta directly mutate scheduling, fatigue, or database state.
+
+Use HumanDelta first where the project already needs outside knowledge:
+
+- job search
+- uploaded user docs
+- Gmail-derived digests
 
 ---
 
-## 12. MVP Integration Scope
+## 13. MVP Integration Scope
 
 ## Include in MVP
-- connector signal validation for Gmail and Google Calendar
-- memory candidate validation before `learned_memories`
-- optional simple decision evaluation logging
+
+- HumanDelta client support for indexes, documents, search, and preview/list/delete flows
+- website indexing for job-search-related sources
+- document upload for generated markdown and user-provided files
+- search over indexed sources and uploaded documents
 
 ## Exclude from MVP
-- real-time decision dependency
+
+- making HumanDelta the final validation engine
+- real-time hard dependency in decision routes
 - scheduling dependency
 - fatigue estimation dependency
 - automatic direct writes from HumanDelta to product tables
-- broad validation of every interaction event
 
 ---
 
-## 13. Rollout Plan
+## 14. Rollout Plan
 
-## Phase 1 - Connector validation
+## Phase 1 - Website indexing for job search
+
 First implement HumanDelta for:
-- normalized Gmail obligation candidates
-- normalized calendar planning candidates
+
+- website indexing
+- crawl status polling
+- search over indexed job-related sources
 
 ### Goal
-Prevent weak or noisy external data from creating low-quality product state.
+
+Support job-search workflows and watchers with retrieval over approved external sources.
 
 ---
 
-## Phase 2 - Memory validation
+## Phase 2 - Document uploads
+
 Then implement HumanDelta for:
-- distilled memory candidate validation
+
+- user-uploaded files
+- generated markdown documents
+- Gmail-derived markdown once Gmail connector flow exists
 
 ### Goal
-Ensure only strong behavioral patterns become durable memory.
+
+Create a reusable, searchable personal knowledge layer for the assistant.
 
 ---
 
-## Phase 3 - Decision evaluation
+## Phase 3 - Retrieval-powered assistant support
+
 Then implement HumanDelta for:
-- post-decision evaluation
+
+- retrieval support in selected watcher and assistant flows
+- prompt/context enrichment where useful
 
 ### Goal
-Improve long-term system judgment without slowing real-time flows.
+
+Improve the assistant's context access without moving product truth or scheduling logic outside the backend.
 
 ---
 
-## 14. Benefits
+## 15. Benefits
 
 If integrated correctly, HumanDelta can improve:
 
-- connector signal quality
-- quality of created tasks
-- trust in learned memory
-- explainability of why something was stored or rejected
-- long-term decision quality
-- confidence in personalization
+- knowledge retrieval quality
+- support for job search workflows
+- usefulness of uploaded user documents
+- ability to search Gmail-derived summaries later
+- speed of shipping retrieval features without standing up custom infra
 
 ---
 
-## 15. Risks and Mitigations
+## 16. Risks and Mitigations
 
-## Risk 1 - Too much dependency on external service
-### Mitigation
-Keep HumanDelta async and advisory only.
+## Risk 1 - Overusing HumanDelta for logic it does not own
 
-## Risk 2 - Added complexity too early
 ### Mitigation
-Start only with connector validation.
 
-## Risk 3 - Duplicate logic with backend rules
-### Mitigation
-Keep deterministic backend rules for hard checks and use HumanDelta only for gray-area validation.
+Keep HumanDelta as retrieval infrastructure only.
 
-## Risk 4 - Latency creep
+## Risk 2 - Latency creep in user-facing decision flows
+
 ### Mitigation
-Never place HumanDelta in the real-time decision path for MVP.
+
+Use workers for ingestion and keep synchronous retrieval optional and bounded.
+
+## Risk 3 - Mixing retrieved context with operational truth
+
+### Mitigation
+
+Keep HumanDelta outputs advisory and separate from direct product-state writes.
+
+## Risk 4 - Uploading too much low-value content
+
+### Mitigation
+
+Start with curated sources and high-value document generation paths.
 
 ---
 
-## 16. Final Recommendation
+## 17. Final Recommendation
 
 The best way to integrate HumanDelta into this product is:
 
@@ -651,11 +701,12 @@ The best way to integrate HumanDelta into this product is:
 - not as the database
 - not as the scheduler
 
-But as a **knowledge quality and trust layer** that validates:
-- external connector signals
-- long-term memory candidates
-- past decision quality
+But as a **managed retrieval layer** for:
+
+- crawled websites
+- uploaded user files
+- generated markdown knowledge artifacts
 
 ### Final one-line summary
 
-> Supabase stores the truth, the backend runs the product, and HumanDelta checks whether important signals are trustworthy enough to use.
+> Supabase stores the product truth, the backend runs the assistant, and HumanDelta provides searchable external and document knowledge.

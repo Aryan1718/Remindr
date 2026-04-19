@@ -2,71 +2,82 @@ import { useMemo, useState } from "react";
 import { Eye, EyeOff, Lock, Mail, Phone, User } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { AuthHeader, AuthShell, AuthSocialButtons, authFieldClassName } from "@/components/auth/AuthShell";
-import { useSaveOnboardingMutation } from "@/features/onboarding/mutations";
-import { useOnboardingQuery } from "@/features/onboarding/queries";
-import type { OnboardingDraft } from "@/types/domain";
+import { getAuthErrorMessage, validateEmail, validatePassword, validateRequired } from "@/lib/authValidation";
+import { getPostLoginRoute, useAuthStore } from "@/stores/authStore";
 
-function createSignupDraft(fullName: string, currentDraft?: OnboardingDraft): OnboardingDraft {
-  return {
-    stage: "onboarding",
-    name: fullName.trim(),
-    timezone: "UTC-8 (Pacific Time)",
-    role: "professional",
-    bio: "",
-    wakeTime: "07:00",
-    sleepTime: "23:00",
-    workStart: "09:00",
-    workEnd: "17:00",
-    workHours: "09:00 - 17:00",
-    commitments: "",
-    focusWindow: "morning",
-    weekendPattern: "flexible",
-    decisionStyle: "Ranked options",
-    reminderTolerance: "Balanced",
-    fatigueCheckIn: "Daily",
-    recommendationStyle: "Balanced",
-    reminderStyle: "Gentle",
-    notificationFrequency: "Moderate",
-    quietHoursStart: "22:00",
-    quietHoursEnd: "08:00",
-    goalTitle: currentDraft?.goalTitle ?? "",
-    goalHorizon: currentDraft?.goalHorizon ?? "",
-    goalImportance: currentDraft?.goalImportance ?? "Medium",
-    goalNotes: currentDraft?.goalNotes ?? "",
-    tasks: [],
-    connectors: [],
-    telegramConnected: false,
-    completed: false,
-  };
+function fieldClass(hasError: boolean) {
+  return hasError ? `${authFieldClassName} border-red-400/60 focus:border-red-400/70 focus:ring-red-400/40` : authFieldClassName;
 }
 
 export function SignupPage() {
   const navigate = useNavigate();
-  const { data: onboardingDraft, isLoading } = useOnboardingQuery();
-  const saveOnboardingMutation = useSaveOnboardingMutation();
+  const signup = useAuthStore((state) => state.signup);
+  const authError = useAuthStore((state) => state.error);
+  const clearAuthError = useAuthStore((state) => state.clearError);
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [contact, setContact] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [pageError, setPageError] = useState<string | null>(null);
+  const [pageMessage, setPageMessage] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<{
+    fullName?: string;
+    email?: string;
+    contact?: string;
+    password?: string;
+  }>({});
 
   const submitDisabled = useMemo(
     () =>
-      isLoading ||
-      saveOnboardingMutation.isPending ||
+      isSubmitting ||
       fullName.trim().length === 0 ||
       email.trim().length === 0 ||
       contact.trim().length === 0 ||
       password.trim().length === 0,
-    [contact, email, fullName, isLoading, password, saveOnboardingMutation.isPending],
+    [contact, email, fullName, isSubmitting, password],
   );
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (submitDisabled) return;
+    const nextFieldErrors = {
+      fullName: validateRequired(fullName, "Full name") ?? undefined,
+      email: validateEmail(email) ?? undefined,
+      contact: validateRequired(contact, "Contact") ?? undefined,
+      password: validatePassword(password, { minimumLength: 6, required: true }) ?? undefined,
+    };
 
-    await saveOnboardingMutation.mutateAsync(createSignupDraft(fullName, onboardingDraft));
-    navigate("/onboarding");
+    setFieldErrors(nextFieldErrors);
+    if (nextFieldErrors.fullName || nextFieldErrors.email || nextFieldErrors.contact || nextFieldErrors.password) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    setPageError(null);
+    setPageMessage(null);
+    clearAuthError();
+
+    try {
+      const result = await signup({
+        fullName: fullName.trim(),
+        email: email.trim(),
+        contact: contact.trim(),
+        password,
+        rememberMe: true,
+      });
+
+      if (result.requiresEmailConfirmation) {
+        setPageMessage("Account created. Check your email to confirm your account before signing in.");
+        return;
+      }
+
+      navigate(getPostLoginRoute(result.snapshot), { replace: true });
+    } catch (error) {
+      setPageError(getAuthErrorMessage(error, authError || "Unable to create account"));
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   return (
@@ -77,6 +88,18 @@ export function SignupPage() {
       />
 
       <form className="relative space-y-4 sm:space-y-5" onSubmit={handleSubmit}>
+        {pageError ? (
+          <div className="rounded-2xl border border-red-400/25 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+            {pageError}
+          </div>
+        ) : null}
+
+        {pageMessage ? (
+          <div className="rounded-2xl border border-cyan-400/25 bg-cyan-500/10 px-4 py-3 text-sm text-cyan-100">
+            {pageMessage}
+          </div>
+        ) : null}
+
         <div>
           <label className="mb-2 block text-sm font-medium text-gray-300" htmlFor="signup-name">
             Full name
@@ -87,15 +110,31 @@ export function SignupPage() {
             </div>
             <input
               autoComplete="name"
-              className={`${authFieldClassName} pl-10 pr-4 text-sm sm:text-base`}
+              className={`${fieldClass(Boolean(fieldErrors.fullName))} pl-10 pr-4 text-sm sm:text-base`}
               id="signup-name"
-              onChange={(event) => setFullName(event.target.value)}
+              onBlur={() =>
+                setFieldErrors((current) => ({
+                  ...current,
+                  fullName: validateRequired(fullName, "Full name") ?? undefined,
+                }))
+              }
+              onChange={(event) => {
+                setFullName(event.target.value);
+                if (fieldErrors.fullName || pageError) {
+                  setFieldErrors((current) => ({
+                    ...current,
+                    fullName: validateRequired(event.target.value, "Full name") ?? undefined,
+                  }));
+                  setPageError(null);
+                }
+              }}
               placeholder="Your full name"
               style={{ boxShadow: "inset 0 2px 4px rgba(0, 0, 0, 0.2)" }}
               type="text"
               value={fullName}
             />
           </div>
+          {fieldErrors.fullName ? <p className="mt-2 text-sm text-red-200">{fieldErrors.fullName}</p> : null}
         </div>
 
         <div>
@@ -108,15 +147,31 @@ export function SignupPage() {
             </div>
             <input
               autoComplete="email"
-              className={`${authFieldClassName} pl-10 pr-4 text-sm sm:text-base`}
+              className={`${fieldClass(Boolean(fieldErrors.email))} pl-10 pr-4 text-sm sm:text-base`}
               id="signup-email"
-              onChange={(event) => setEmail(event.target.value)}
+              onBlur={() =>
+                setFieldErrors((current) => ({
+                  ...current,
+                  email: validateEmail(email) ?? undefined,
+                }))
+              }
+              onChange={(event) => {
+                setEmail(event.target.value);
+                if (fieldErrors.email || pageError) {
+                  setFieldErrors((current) => ({
+                    ...current,
+                    email: validateEmail(event.target.value) ?? undefined,
+                  }));
+                  setPageError(null);
+                }
+              }}
               placeholder="you@example.com"
               style={{ boxShadow: "inset 0 2px 4px rgba(0, 0, 0, 0.2)" }}
               type="email"
               value={email}
             />
           </div>
+          {fieldErrors.email ? <p className="mt-2 text-sm text-red-200">{fieldErrors.email}</p> : null}
         </div>
 
         <div>
@@ -129,15 +184,31 @@ export function SignupPage() {
             </div>
             <input
               autoComplete="tel"
-              className={`${authFieldClassName} pl-10 pr-4 text-sm sm:text-base`}
+              className={`${fieldClass(Boolean(fieldErrors.contact))} pl-10 pr-4 text-sm sm:text-base`}
               id="signup-contact"
-              onChange={(event) => setContact(event.target.value)}
+              onBlur={() =>
+                setFieldErrors((current) => ({
+                  ...current,
+                  contact: validateRequired(contact, "Contact") ?? undefined,
+                }))
+              }
+              onChange={(event) => {
+                setContact(event.target.value);
+                if (fieldErrors.contact || pageError) {
+                  setFieldErrors((current) => ({
+                    ...current,
+                    contact: validateRequired(event.target.value, "Contact") ?? undefined,
+                  }));
+                  setPageError(null);
+                }
+              }}
               placeholder="+1 (555) 123-4567"
               style={{ boxShadow: "inset 0 2px 4px rgba(0, 0, 0, 0.2)" }}
               type="tel"
               value={contact}
             />
           </div>
+          {fieldErrors.contact ? <p className="mt-2 text-sm text-red-200">{fieldErrors.contact}</p> : null}
         </div>
 
         <div>
@@ -150,9 +221,24 @@ export function SignupPage() {
             </div>
             <input
               autoComplete="new-password"
-              className={`${authFieldClassName} pl-10 pr-12 text-sm sm:text-base`}
+              className={`${fieldClass(Boolean(fieldErrors.password))} pl-10 pr-12 text-sm sm:text-base`}
               id="signup-password"
-              onChange={(event) => setPassword(event.target.value)}
+              onBlur={() =>
+                setFieldErrors((current) => ({
+                  ...current,
+                  password: validatePassword(password, { minimumLength: 6, required: true }) ?? undefined,
+                }))
+              }
+              onChange={(event) => {
+                setPassword(event.target.value);
+                if (fieldErrors.password || pageError) {
+                  setFieldErrors((current) => ({
+                    ...current,
+                    password: validatePassword(event.target.value, { minimumLength: 6, required: true }) ?? undefined,
+                  }));
+                  setPageError(null);
+                }
+              }}
               placeholder="Create a password"
               style={{ boxShadow: "inset 0 2px 4px rgba(0, 0, 0, 0.2)" }}
               type={showPassword ? "text" : "password"}
@@ -167,6 +253,10 @@ export function SignupPage() {
               {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
             </button>
           </div>
+          {fieldErrors.password ? <p className="mt-2 text-sm text-red-200">{fieldErrors.password}</p> : null}
+          {!fieldErrors.password ? (
+            <p className="mt-2 text-sm text-gray-400">Use at least 6 characters to meet Supabase password rules.</p>
+          ) : null}
         </div>
 
         <button
@@ -180,7 +270,7 @@ export function SignupPage() {
           }}
           type="submit"
         >
-          {saveOnboardingMutation.isPending ? "Creating account..." : "Create Account"}
+          {isSubmitting ? "Creating account..." : "Create Account"}
         </button>
 
         <AuthSocialButtons mode="signup" />
