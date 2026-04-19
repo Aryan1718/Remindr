@@ -104,6 +104,52 @@ class LLMTests(unittest.TestCase):
 
         self.assertIsInstance(client, GeminiOpenAICompatibleLLM)
 
+    def test_openai_compatible_generate_embeddings_parses_vectors(self) -> None:
+        client = DummyHttpClient(
+            {
+                "data": [
+                    {"embedding": [0.1, 0.2, 0.3]},
+                    {"embedding": [0.4, 0.5, 0.6]},
+                ]
+            }
+        )
+        llm = OpenAICompatibleLLM(
+            api_key="test-key",
+            model="text-embedding",
+            base_url="https://example.com/v1",
+            http_client=client,
+        )
+
+        result = llm.generate_embeddings(texts=["one", "two"])
+
+        self.assertEqual(result, [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]])
+        self.assertEqual(client.calls[0]["url"], "https://example.com/v1/embeddings")
+
+    def test_settings_default_embeddings_to_openai_model(self) -> None:
+        settings = Settings.model_validate(
+            {
+                "llm_provider": "gemini",
+                "llm_api_key": "gemini-key",
+                "llm_model": "gemini-2.5-flash",
+                "openai_api_key": "openai-key",
+            }
+        )
+
+        self.assertEqual(settings.resolved_embedding_model, "text-embedding-3-small")
+        self.assertEqual(settings.resolved_openai_api_key, "openai-key")
+        self.assertEqual(settings.resolved_openai_base_url, "https://api.openai.com/v1")
+
+    def test_settings_allow_openai_llm_key_fallback_for_embeddings(self) -> None:
+        settings = Settings.model_validate(
+            {
+                "llm_provider": "openai",
+                "llm_api_key": "shared-openai-key",
+                "llm_model": "gpt-4.1-mini",
+            }
+        )
+
+        self.assertEqual(settings.resolved_openai_api_key, "shared-openai-key")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -33,6 +33,22 @@ from app.services.memory_service import MemoryService
 logger = logging.getLogger("app.services.decision")
 
 
+class _NoopMemoryService:
+    def normalize_retrieval_query(self, *, query: str | None, domain: str | None = None) -> str | None:
+        _ = domain
+        return query
+
+    def get_relevant_memories(
+        self,
+        user_id: str,
+        query: str | None,
+        domain: str | None = None,
+        limit: int = 5,
+    ) -> list[dict[str, object]]:
+        _ = (user_id, query, domain, limit)
+        return []
+
+
 @dataclass(slots=True)
 class DecisionContext:
     user: UserModel | None
@@ -82,7 +98,12 @@ class DecisionService:
         self.calendar_repository = calendar_repository or self._require_repo(InternalCalendarRepository, connection)
         self.user_repository = user_repository or self._require_repo(UserRepository, connection)
         self.fatigue_service = fatigue_service or FatigueService(connection)
-        self.memory_service = memory_service or MemoryService(connection)
+        if memory_service is not None:
+            self.memory_service = memory_service
+        elif connection is not None:
+            self.memory_service = MemoryService(connection)
+        else:
+            self.memory_service = _NoopMemoryService()
 
     def query(self, *, user_id: str, payload: DecisionQueryRequest) -> DecisionResponse:
         context = self.build_decision_context(
@@ -649,7 +670,13 @@ class DecisionService:
             logger.warning("interaction_events table not found; skipped %s event", event_type)
 
     def _load_relevant_memories(self, *, user_id: str, query: str | None, domain_hint: str | None) -> list[dict[str, object]]:
-        return self.memory_service.get_relevant_memories(user_id=user_id, query=query, domain=domain_hint, limit=5)
+        normalized_query = self.memory_service.normalize_retrieval_query(query=query, domain=domain_hint)
+        return self.memory_service.get_relevant_memories(
+            user_id=user_id,
+            query=normalized_query,
+            domain=domain_hint,
+            limit=5,
+        )
 
     def _memory_alignment_score(self, *, task: TaskModel, context: DecisionContext, now: datetime) -> float:
         score = 0.0

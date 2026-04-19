@@ -6,9 +6,7 @@ from datetime import UTC, datetime, timedelta
 from statistics import pvariance
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-import psycopg
-from psycopg.rows import dict_row
-
+from app.core.db import connect_db
 from app.models.fatigue import (
     FatigueCheckinModel,
     FatiguePatternModel,
@@ -103,7 +101,7 @@ class FatigueAggregationWorker:
 
 
 def recompute_fatigue_patterns_job(*, database_url: str, user_id: str | None, days_back: int) -> list[FatiguePatternModel]:
-    with psycopg.connect(database_url, row_factory=dict_row) as connection:
+    with connect_db(database_url=database_url) as connection:
         worker = FatigueAggregationWorker(FatigueRepository(connection))
         patterns = worker.recompute_patterns(user_id=user_id, days_back=days_back)
 

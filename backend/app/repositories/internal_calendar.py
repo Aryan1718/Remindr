@@ -410,6 +410,9 @@ class InternalCalendarRepository:
                     feedback.created_at,
                     block.starts_at,
                     block.ends_at,
+                    block.block_type,
+                    block.task_id,
+                    block.title,
                     extract(epoch from (block.ends_at - block.starts_at)) / 60 as duration_minutes
                 from calendar_feedback feedback
                 join internal_calendar block on block.id = feedback.calendar_block_id

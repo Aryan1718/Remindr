@@ -84,6 +84,13 @@ class FakeMemoryService:
     def __init__(self, memories: list[dict] | None = None) -> None:
         self.memories = memories or []
         self.calls: list[tuple[str, str | None, str | None, int]] = []
+        self.normalized_queries: list[tuple[str | None, str | None]] = []
+
+    def normalize_retrieval_query(self, *, query: str | None, domain: str | None = None) -> str | None:
+        self.normalized_queries.append((query, domain))
+        if query is None:
+            return None
+        return f"normalized::{query}"
 
     def get_relevant_memories(self, user_id: str, query: str | None, domain: str | None = None, limit: int = 5) -> list[dict]:
         self.calls.append((user_id, query, domain, limit))
@@ -256,6 +263,31 @@ def test_planned_soon_task_penalty_works() -> None:
     )
 
     assert response.primary_recommendation.task_id == "free"
+
+
+def test_decision_flow_uses_normalized_memory_query_and_passes_retrieved_memories() -> None:
+    tasks = [
+        build_task(task_id="heavy", due_in_hours=24, priority=4, estimated_minutes=120, energy_required=5),
+        build_task(task_id="light", due_in_hours=24, priority=4, estimated_minutes=30, energy_required=2),
+    ]
+    memories = [
+        {
+            "statement": "User often avoids demanding evening work",
+            "confidence": 0.9,
+            "metadata_json": {},
+        }
+    ]
+    service, _, _, memory_service = build_service(tasks=tasks, fatigue_score=5, memories=memories)
+
+    context = service.build_decision_context(
+        user_id="user-1",
+        query="Should I work on this tonight?",
+        domain_hint="planning",
+    )
+
+    assert memory_service.normalized_queries == [("Should I work on this tonight?", "planning")]
+    assert memory_service.calls == [("user-1", "normalized::Should I work on this tonight?", "planning", 5)]
+    assert context.relevant_memories == memories
 
 
 def test_owner_scoping_is_preserved() -> None:

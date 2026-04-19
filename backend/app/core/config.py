@@ -38,6 +38,10 @@ class Settings(BaseModel):
     llm_provider: str = "gemini"
     llm_api_key: str | None = None
     llm_model: str | None = "gemini-2.5-flash"
+    embedding_model: str | None = None
+    openai_api_key: str | None = None
+    openai_embedding_model: str | None = None
+    openai_base_url: str | None = None
     llm_base_url: str | None = None
     llm_timeout_seconds: float = 20.0
     telegram_validate_bot_tokens: bool = False
@@ -83,6 +87,31 @@ class Settings(BaseModel):
         if self.llm_provider.lower() == "gemini":
             return "https://generativelanguage.googleapis.com/v1beta/openai"
         return None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def resolved_embedding_model(self) -> str | None:
+        if self.openai_embedding_model:
+            return self.openai_embedding_model
+        if self.embedding_model:
+            return self.embedding_model
+        return "text-embedding-3-small"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def resolved_openai_api_key(self) -> str | None:
+        if self.openai_api_key:
+            return self.openai_api_key
+        if self.llm_provider.lower() == "openai":
+            return self.llm_api_key
+        return None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def resolved_openai_base_url(self) -> str | None:
+        if self.openai_base_url:
+            return self.openai_base_url.rstrip("/")
+        return "https://api.openai.com/v1"
 
 
 def _parse_cors_origins(value: object) -> list[str]:

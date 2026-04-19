@@ -85,6 +85,29 @@ class OpenAICompatibleLLM(BaseLLMClient):
             raw_response=data,
         )
 
+    def generate_embeddings(
+        self,
+        *,
+        texts: list[str],
+        model: str | None = None,
+    ) -> list[list[float]]:
+        payload: dict[str, Any] = {
+            "model": model or self.model,
+            "input": texts,
+        }
+        response = self._http_client.post(
+            f"{self.base_url}/embeddings",
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        )
+        response.raise_for_status()
+        data = response.json()
+        rows = data.get("data") or []
+        return [list(row.get("embedding") or []) for row in rows]
+
     def _post_chat_completions(self, payload: dict[str, Any]) -> dict[str, Any]:
         response = self._http_client.post(
             f"{self.base_url}/chat/completions",
