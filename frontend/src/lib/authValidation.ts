@@ -15,11 +15,11 @@ export function validateEmail(value: string) {
 }
 
 export function validatePassword(value: string, options: { required?: boolean; minimumLength?: number } = {}) {
-  const minimumLength = options.minimumLength ?? MIN_PASSWORD_LENGTH;
+  const minimumLength = options.minimumLength;
   if (!value.trim()) {
     return options.required === false ? null : "Password is required.";
   }
-  if (value.length < minimumLength) {
+  if (minimumLength !== undefined && value.length < minimumLength) {
     return `Password must be at least ${minimumLength} characters.`;
   }
   return null;
