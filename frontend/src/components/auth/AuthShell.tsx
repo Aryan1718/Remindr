@@ -106,6 +106,7 @@ interface SocialButtonsProps {
   busy?: boolean;
   onSelect?: (provider: AuthSocialProvider) => void;
   pendingProvider?: AuthSocialProvider | null;
+  providers?: AuthSocialProvider[];
 }
 
 export function AuthShell({
@@ -188,8 +189,17 @@ export function AuthHeader({ description, subtitle }: AuthHeaderProps) {
   );
 }
 
-export function AuthSocialButtons({ mode, busy = false, onSelect, pendingProvider = null }: SocialButtonsProps) {
+export function AuthSocialButtons({
+  mode,
+  busy = false,
+  onSelect,
+  pendingProvider = null,
+  providers,
+}: SocialButtonsProps) {
   const prefix = mode === "signup" ? "Create account with" : "Sign in with";
+  const enabledProviders = providers
+    ? socialProviders.filter((provider) => providers.includes(provider.id))
+    : socialProviders;
 
   return (
     <>
@@ -203,7 +213,7 @@ export function AuthSocialButtons({ mode, busy = false, onSelect, pendingProvide
       </div>
 
       <div className="space-y-2.5 sm:space-y-3">
-        {socialProviders.map((provider) => (
+        {enabledProviders.map((provider) => (
           <button
             className={`${socialButtonClassName} text-sm sm:text-base disabled:cursor-wait disabled:opacity-80`}
             disabled={busy && pendingProvider !== null && pendingProvider !== provider.id}
